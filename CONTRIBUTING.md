@@ -53,6 +53,11 @@ cargo run -p simplineage-cli -- hello
 
 # Optional full tools in Docker
 docker compose --profile dev run --rm dev
+
+# Run the CLI image without host Rust (import samples, export HTML)
+# See docs/docker.md
+docker compose build simplineage
+docker compose run --rm simplineage --help
 ```
 
 ```bash

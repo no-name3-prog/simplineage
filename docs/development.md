@@ -17,6 +17,8 @@ commands on their laptop.
 | `Dockerfile.dev` / Codespaces | Same tools as CI without installing them on the host |
 | `Dockerfile` | Runtime CLI image |
 
+User-facing Docker runbook (import samples, export HTML, volumes): **[docker.md](docker.md)**.
+
 ## CI jobs
 
 See `.github/workflows/ci.yml`. The aggregate job **CI Success** is intended as

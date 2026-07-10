@@ -5,7 +5,7 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Phase 0.2 — engineering standards & CI. Application logic is still
+> **Status:** Phase 0.3 — repository governance & PR-only development workflow. Application logic is still
 > scaffolding; quality gates and collaboration workflow are ready.
 
 [![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
@@ -103,6 +103,7 @@ Default: [`config/default.toml`](config/default.toml). Override with
 ## Project docs
 
 - [Contributing](CONTRIBUTING.md) — **CI-first** workflow  
+- [Governance](docs/GOVERNANCE.md) — **PR-only** process for every phase  
 - [Development](docs/development.md)  
 - [Code of Conduct](CODE_OF_CONDUCT.md)  
 - [Security](SECURITY.md)  

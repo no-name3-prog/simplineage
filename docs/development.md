@@ -1,5 +1,9 @@
 # Development guide
 
+## Governance
+
+All work follows [GOVERNANCE.md](GOVERNANCE.md): feature branch → PR → CI Success → senior maintainer review → squash merge. **Never push directly to `main`.**
+
 ## Philosophy: CI-first
 
 Heavy engineering tools run in **GitHub Actions** (and optionally in Docker /

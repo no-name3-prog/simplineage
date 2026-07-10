@@ -1,0 +1,18 @@
+[package]
+name = "simplineage-bindings"
+description = "Language bindings surface for SimpLineage (Python, etc.) — placeholder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+simplineage-core.workspace = true
+
+[features]
+default = []
+# Future: pyo3 = ["dep:pyo3"], napi = ["dep:napi"], etc.

@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/simplineage-core",
+    "crates/simplineage-importers",
+    "crates/simplineage-storage",
+    "crates/simplineage-analysis",
+    "crates/simplineage-exporters",
+    "crates/simplineage-cli",
+    "crates/simplineage-server",
+    "crates/simplineage-bindings",
+]
+default-members = ["crates/simplineage-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["SimpLineage Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/no-name3-prog/simplineage"
+homepage = "https://github.com/no-name3-prog/simplineage"
+description = "Offline-first metadata intelligence SDK for data lineage"
+readme = "README.md"
+keywords = ["lineage", "metadata", "data-engineering", "graph"]
+categories = ["data-structures", "command-line-utilities"]
+
+[workspace.dependencies]
+# Internal crates
+simplineage-core = { path = "crates/simplineage-core", version = "0.1.0" }
+simplineage-importers = { path = "crates/simplineage-importers", version = "0.1.0" }
+simplineage-storage = { path = "crates/simplineage-storage", version = "0.1.0" }
+simplineage-analysis = { path = "crates/simplineage-analysis", version = "0.1.0" }
+simplineage-exporters = { path = "crates/simplineage-exporters", version = "0.1.0" }
+simplineage-server = { path = "crates/simplineage-server", version = "0.1.0" }
+simplineage-bindings = { path = "crates/simplineage-bindings", version = "0.1.0" }
+
+# Shared third-party dependencies
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+clap = { version = "4", features = ["derive", "env"] }
+config = "0.15"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+debug = true

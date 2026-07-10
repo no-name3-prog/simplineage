@@ -1,0 +1,25 @@
+[package]
+name = "simplineage-cli"
+description = "Command-line interface for SimpLineage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[[bin]]
+name = "simplineage"
+path = "src/main.rs"
+
+[dependencies]
+simplineage-core.workspace = true
+simplineage-importers.workspace = true
+simplineage-storage.workspace = true
+simplineage-analysis.workspace = true
+simplineage-exporters.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true

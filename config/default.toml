@@ -1,0 +1,16 @@
+# Default SimpLineage configuration
+# Override with config/local.toml, environment variables (SIMPLINEAGE_*), or CLI flags.
+
+[logging]
+# trace | debug | info | warn | error
+level = "info"
+# text | json
+format = "text"
+
+[storage]
+# Default path for local metadata store (relative or absolute)
+data_dir = ".simplineage"
+
+[server]
+host = "127.0.0.1"
+port = 8080

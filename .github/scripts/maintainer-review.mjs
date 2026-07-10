@@ -204,14 +204,28 @@ if (isCore && touchesRust && !touchesDocs && /pub (fn|struct|enum|trait|type|mod
   );
 }
 
-// ── Workflow safety ──────────────────────────────────────
-if (files.some((f) => f.startsWith(".github/workflows/"))) {
-  if (/curl .+\|\s*(ba)?sh/i.test(diff)) {
+// ── Workflow safety (scan workflow YAML only — not docs) ─
+const workflowFiles = files.filter((f) => f.startsWith(".github/workflows/") && /\.(yml|yaml)$/.test(f));
+if (workflowFiles.length) {
+  let wfDiff = "";
+  for (const f of workflowFiles) {
+    try {
+      wfDiff += sh(`git diff ${base}...${head} -- ${f}`) + "\n";
+    } catch {
+      /* ignore */
+    }
+  }
+  // Flag only added lines that pipe curl/wget into a shell (supply chain)
+  const added = wfDiff
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+    .join("\n");
+  if (/curl\s+[^\n|]+\|\s*(ba)?sh/i.test(added) || /wget\s+[^\n|]+\|\s*(ba)?sh/i.test(added)) {
     blockers.push(
       "Workflow pipes a remote script to a shell — avoid for supply-chain safety."
     );
   }
-  if (/permissions:\s*\n\s*contents:\s*write/i.test(diff) && /pull_request_target/i.test(diff)) {
+  if (/pull_request_target/i.test(added) && /contents:\s*write/i.test(wfDiff)) {
     blockers.push(
       "`pull_request_target` with write permissions is high risk — double-check fork PR safety."
     );

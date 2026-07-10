@@ -1,0 +1,24 @@
+{
+  "name": "SimpLineage",
+  "build": {
+    "dockerfile": "../Dockerfile.dev"
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy"
+      }
+    }
+  },
+  "postCreateCommand": "cargo fetch",
+  "remoteUser": "root",
+  "forwardPorts": [],
+  "features": {}
+}

@@ -1,0 +1,23 @@
+# Optional: run without installing Rust tools on the host.
+# Requires only Docker Desktop / Colima / OrbStack.
+services:
+  simplineage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: simplineage:local
+    command: ["hello", "--name", "docker"]
+    environment:
+      RUST_LOG: info
+
+  # Interactive shell with nextest, deny, audit, llvm-cov preinstalled
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: simplineage-dev:local
+    profiles: ["dev"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command: ["bash"]

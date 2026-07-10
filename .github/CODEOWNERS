@@ -1,0 +1,6 @@
+* @no-name3-prog
+/.github/ @no-name3-prog
+/deny.toml @no-name3-prog
+/Dockerfile @no-name3-prog
+/crates/simplineage-core/ @no-name3-prog
+/crates/simplineage-cli/ @no-name3-prog

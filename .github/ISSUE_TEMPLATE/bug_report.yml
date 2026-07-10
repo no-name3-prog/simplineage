@@ -1,0 +1,48 @@
+name: Bug report
+description: Report unexpected behavior
+title: "[Bug]: "
+labels: [bug, triage]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. cargo run -p simplineage-cli -- ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "0.1.0 or git SHA"
+    validations:
+      required: true
+  - type: input
+    id: rust
+    attributes:
+      label: Rust version (if local)
+      placeholder: "rustc -V — optional if you only used CI"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: text

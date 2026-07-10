@@ -1,0 +1,17 @@
+name: Documentation
+description: Missing or incorrect docs
+title: "[Docs]: "
+labels: [documentation, triage]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Where
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is wrong or missing?
+    validations:
+      required: true

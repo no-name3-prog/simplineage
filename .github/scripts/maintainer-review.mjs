@@ -270,7 +270,7 @@ const body = [
   "",
   section("Verdict", [
     approved
-      ? "**Approve** — no static merge blockers. **CI Success** must still be green before merge."
+      ? "**Looks good (automated)** — no static blockers. **CI Success** must be green; a **human maintainer** must still approve and squash-merge."
       : "**Request changes** — resolve blockers, push to the feature branch, and re-run the full CI + review cycle.",
   ]),
   section("Change map", [
@@ -318,10 +318,10 @@ const body = [
     "2. Push to the **same feature branch** (never to `main`).",
     "3. Full CI pipeline re-runs automatically.",
     "4. Maintainer re-reviews until approved.",
-    "5. Squash-merge into `main` when CI Success is green and review is clean.",
+    "5. **Human maintainer** squash-merges into `main` when CI Success is green and they are satisfied.",
   ]),
   "---",
-  "_Automated senior-maintainer bot for SimpLineage · see [docs/GOVERNANCE.md](../docs/GOVERNANCE.md)._",
+  "_Automated senior-maintainer **review** bot (no auto-merge) · see [docs/GOVERNANCE.md](../docs/GOVERNANCE.md)._",
   "<!-- maintainer-bot-review -->",
 ].join("\n");
 

@@ -681,6 +681,31 @@ mod tests {
     use crate::intermediate::{IntermediateCatalog, IntermediateColumn, IntermediateTable};
 
     #[test]
+    fn parse_bigquery_data_types() {
+        assert!(matches!(
+            parse_data_type(Some("INT64")),
+            DataType::Integer { bits: Some(64) }
+        ));
+        assert!(matches!(
+            parse_data_type(Some("STRING")),
+            DataType::String { .. }
+        ));
+        assert!(matches!(
+            parse_data_type(Some("NUMERIC")),
+            DataType::Decimal { .. }
+        ));
+        assert!(matches!(
+            parse_data_type(Some("TIMESTAMP")),
+            DataType::Timestamp { .. }
+        ));
+        assert!(matches!(parse_data_type(Some("DATE")), DataType::Date));
+        assert!(matches!(
+            parse_data_type(Some("FLOAT64")),
+            DataType::Float { bits: Some(64) }
+        ));
+    }
+
+    #[test]
     fn builds_snapshot_from_rows() {
         let cat = IntermediateCatalog {
             source: Some("test".into()),

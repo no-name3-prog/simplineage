@@ -93,6 +93,7 @@ Structured logging uses [`tracing`](https://docs.rs/tracing) with
 | Config & logging | Implemented in core |
 | Core metadata model | Implemented (Phase 1) |
 | Import framework (CSV/JSON/Parquet/Excel) | Implemented |
+| Lineage graph engine | Implemented (Phase 3) |
 | Hello World CLI | Implemented |
 | Importers / storage / analysis / exporters | Placeholders only |
 | Server / web / language bindings | Placeholders only |
@@ -117,3 +118,7 @@ Structured logging uses [`tracing`](https://docs.rs/tracing) with
 ## Metadata model
 
 See [metadata-model.md](metadata-model.md) for the vendor-agnostic catalog types.
+
+## Graph engine
+
+See [graph-engine.md](graph-engine.md).

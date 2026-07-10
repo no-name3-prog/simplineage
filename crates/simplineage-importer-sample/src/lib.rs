@@ -1,7 +1,7 @@
 //! Sample warehouse importer plugin.
 //!
 //! Demonstrates that adding a warehouse only requires a new crate implementing
-//! [`MetadataImporter`](simplineage_importers::MetadataImporter) and registering
+//! [`MetadataImporter`] and registering
 //! it. This plugin reads a minimal proprietary JSON dump:
 //!
 //! ```json

@@ -18,6 +18,8 @@ Or from a snapshot JSON file:
 simplineage export -f html -s ./snap.json -o lineage.html
 ```
 
+Using Docker only (no host Rust): see **[docker.md](docker.md)** — mount `examples/` and write HTML to a host folder such as `./out/lineage.html`.
+
 ## Features
 
 | Feature | Behavior |

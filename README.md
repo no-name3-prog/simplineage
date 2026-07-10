@@ -72,12 +72,43 @@ cargo run -p simplineage-cli -- --help
 cargo run -p simplineage-cli -- hello --name engineer
 ```
 
-### Docker runtime image
+### Docker (no Rust install)
+
+Build the CLI image and run a smoke command:
 
 ```bash
-docker compose build
+docker compose build simplineage
 docker compose run --rm simplineage
+docker compose run --rm simplineage --help
 ```
+
+Import a sample and write an HTML report (mount examples + host `./out`):
+
+```bash
+mkdir -p ./out
+
+docker compose run --rm \
+  -v "$(pwd)/examples:/data/examples:ro" \
+  -v "$(pwd)/out:/data/out" \
+  -v simplineage-store:/home/simplineage/.simplineage \
+  simplineage \
+  --data-dir /home/simplineage/.simplineage \
+  --no-progress \
+  import /data/examples/production_warehouse_lineage \
+  --label prod-demo
+
+docker compose run --rm \
+  -v "$(pwd)/out:/data/out" \
+  -v simplineage-store:/home/simplineage/.simplineage \
+  simplineage \
+  --data-dir /home/simplineage/.simplineage \
+  --no-progress \
+  export -f html -o /data/out/lineage.html
+
+open ./out/lineage.html   # macOS; Linux: xdg-open ./out/lineage.html
+```
+
+Full guide (volumes, your own files, dev image): **[docs/docker.md](docs/docker.md)**.
 
 ### Tests
 
@@ -90,7 +121,16 @@ make check          # light local: fmt + clippy + test + doc
 
 Use sample data from this repo to try lineage end-to-end: **import → HTML report → open in browser**. No server is required.
 
-You need Rust (via [rustup](https://rustup.rs/)). From the repo root:
+Pick one:
+
+| How | Need |
+|-----|------|
+| **Rust on the host** | [rustup](https://rustup.rs/) — steps below |
+| **Docker only** | Docker Desktop / Colima / OrbStack — see [Docker section](#docker-no-rust-install) and [docs/docker.md](docs/docker.md) |
+
+### With Rust (host)
+
+From the repo root:
 
 ### 1. Production-style demo (recommended)
 
@@ -156,7 +196,7 @@ cargo run -q -p simplineage-cli -- \
 
 Optional: Mermaid text (`export -f mermaid -o lineage.mmd`), search (`search orders`), impact (`impact orders --direction both`).
 
-Full CLI: [docs/cli.md](docs/cli.md) · HTML report features: [docs/html-export.md](docs/html-export.md).
+Full CLI: [docs/cli.md](docs/cli.md) · HTML report: [docs/html-export.md](docs/html-export.md) · Docker: [docs/docker.md](docs/docker.md).
 
 ## Workspace crates
 
@@ -181,6 +221,7 @@ Default: [`config/default.toml`](config/default.toml). Override with
 - [Contributing](CONTRIBUTING.md) — **CI-first** workflow  
 - [Governance](docs/GOVERNANCE.md) — **PR-only** process for every phase  
 - [CLI](docs/cli.md) — command reference  
+- [Docker](docs/docker.md) — run without installing Rust  
 - [HTML export](docs/html-export.md) — offline interactive lineage report  
 - [Metadata model](docs/metadata-model.md) — vendor-agnostic catalog types  
 - [Importers](docs/importers.md) — plugin import framework  

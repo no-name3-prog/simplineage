@@ -147,6 +147,8 @@ simplineage validate
 simplineage export -f html -o lineage.html
 ```
 
+Run the same workflow without installing Rust: **[docker.md](docker.md)**.
+
 ## Progress & rich output
 
 Long-running operations show **spinners** (and a **progress bar** when importing multi-file directories). Colors use ANSI when stdout is a TTY; disable with `--no-color` or `NO_COLOR`.

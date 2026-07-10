@@ -1,0 +1,17 @@
+table_catalog,table_schema,table_name,column_name,ordinal_position,is_nullable,data_type
+acme-prod,marts,fct_orders,order_id,1,NO,STRING
+acme-prod,marts,fct_orders,customer_id,2,NO,STRING
+acme-prod,marts,fct_orders,order_ts,3,NO,TIMESTAMP
+acme-prod,marts,fct_orders,gmv_usd,4,NO,NUMERIC
+acme-prod,marts,fct_orders,net_revenue_usd,5,YES,NUMERIC
+acme-prod,marts,dim_customers,customer_id,1,NO,STRING
+acme-prod,marts,dim_customers,account_id,2,YES,STRING
+acme-prod,marts,dim_customers,segment,3,YES,STRING
+acme-prod,marts,dim_customers,country,4,YES,STRING
+acme-prod,metrics,metrics_revenue_daily,metric_date,1,NO,DATE
+acme-prod,metrics,metrics_revenue_daily,gmv_usd,2,NO,NUMERIC
+acme-prod,metrics,metrics_revenue_daily,net_revenue_usd,3,NO,NUMERIC
+acme-prod,metrics,metrics_revenue_daily,order_count,4,NO,INT64
+acme-prod,serving,bi_exec_dashboard,dashboard_key,1,NO,STRING
+acme-prod,raw,kafka_orders_json,payload,1,YES,STRING
+acme-prod,sandbox,ds_feature_store_experimental,feature_vector,1,YES,STRING

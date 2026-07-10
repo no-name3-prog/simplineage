@@ -1,0 +1,54 @@
+table_catalog,table_schema,table_name,table_type,description
+acme-prod,raw,kafka_orders_json,BASE TABLE,Landing zone: raw Kafka orders topic dump
+acme-prod,raw,kafka_payments_json,BASE TABLE,Landing zone: payments events
+acme-prod,raw,kafka_clicks_json,BASE TABLE,Landing zone: web clickstream
+acme-prod,raw,s3_crm_accounts,BASE TABLE,S3 dump of Salesforce accounts
+acme-prod,raw,s3_crm_contacts,BASE TABLE,S3 dump of Salesforce contacts
+acme-prod,raw,s3_erp_products,BASE TABLE,ERP product master extract
+acme-prod,raw,s3_erp_inventory,BASE TABLE,ERP inventory snapshots
+acme-prod,raw,s3_support_tickets,BASE TABLE,Zendesk ticket export
+acme-prod,raw,s3_marketing_campaigns,BASE TABLE,Marketing campaign metadata
+acme-prod,raw,s3_finance_gl,BASE TABLE,General ledger extract
+acme-prod,staging,stg_orders,VIEW,Cleaned orders from Kafka JSON
+acme-prod,staging,stg_order_items,VIEW,Exploded order line items
+acme-prod,staging,stg_payments,VIEW,Normalized payment events
+acme-prod,staging,stg_clicks,VIEW,Sessionized click events
+acme-prod,staging,stg_accounts,VIEW,CRM accounts typed + deduped
+acme-prod,staging,stg_contacts,VIEW,CRM contacts linked to accounts
+acme-prod,staging,stg_products,VIEW,Product dimension stage
+acme-prod,staging,stg_inventory,VIEW,Inventory stage with warehouse codes
+acme-prod,staging,stg_tickets,VIEW,Support tickets stage
+acme-prod,staging,stg_campaigns,VIEW,Campaign dimension stage
+acme-prod,staging,stg_gl_entries,VIEW,GL journal lines stage
+acme-prod,intermediate,int_orders_enriched,VIEW,Orders joined to accounts + geo
+acme-prod,intermediate,int_order_item_margin,VIEW,Items with cost and margin
+acme-prod,intermediate,int_payment_settlement,VIEW,Payments matched to orders
+acme-prod,intermediate,int_customer_sessions,VIEW,Click sessions attributed to customers
+acme-prod,intermediate,int_ticket_sla,VIEW,Ticket SLA windows and breaches
+acme-prod,intermediate,int_campaign_touchpoints,VIEW,Campaign touches linked to sessions
+acme-prod,intermediate,int_inventory_daily,VIEW,Daily inventory balances by SKU
+acme-prod,intermediate,int_revenue_recognition,VIEW,Revenue timing adjustments from GL
+acme-prod,marts,dim_customers,BASE TABLE,Customer dimension SCD2
+acme-prod,marts,dim_products,BASE TABLE,Product dimension
+acme-prod,marts,dim_campaigns,BASE TABLE,Marketing campaign dimension
+acme-prod,marts,dim_date,BASE TABLE,Date spine
+acme-prod,marts,fct_orders,BASE TABLE,Order grain fact
+acme-prod,marts,fct_order_items,BASE TABLE,Order item grain fact
+acme-prod,marts,fct_payments,BASE TABLE,Payment grain fact
+acme-prod,marts,fct_web_sessions,BASE TABLE,Session grain fact
+acme-prod,marts,fct_support_tickets,BASE TABLE,Ticket grain fact
+acme-prod,marts,fct_inventory_snapshot,BASE TABLE,Daily inventory snapshot fact
+acme-prod,marts,fct_marketing_attribution,BASE TABLE,Multi-touch attribution fact
+acme-prod,metrics,metrics_revenue_daily,MATERIALIZED VIEW,Daily revenue KPIs for executive dashboard
+acme-prod,metrics,metrics_customer_ltv,MATERIALIZED VIEW,Customer LTV cohort metrics
+acme-prod,metrics,metrics_funnel_conversion,MATERIALIZED VIEW,Acquisition funnel conversion rates
+acme-prod,metrics,metrics_ops_sla,MATERIALIZED VIEW,Support SLA and inventory health
+acme-prod,metrics,metrics_marketing_roi,MATERIALIZED VIEW,Campaign ROI rollup
+acme-prod,serving,bi_exec_dashboard,VIEW,Looker explore: exec dashboard
+acme-prod,serving,bi_finance_close,VIEW,Looker explore: finance close pack
+acme-prod,serving,bi_growth_analytics,VIEW,Looker explore: growth & acquisition
+acme-prod,serving,bi_cx_operations,VIEW,Looker explore: CX ops
+acme-prod,serving,rev_etl_salesforce_accounts,BASE TABLE,Reverse ETL sync table to Salesforce
+acme-prod,serving,rev_etl_braze_segments,BASE TABLE,Reverse ETL segments to Braze
+acme-prod,sandbox,ds_feature_store_experimental,BASE TABLE,Orphaned DS experiment table (no consumers)
+acme-prod,archive,legacy_orders_2019,BASE TABLE,Cold archive with no downstream

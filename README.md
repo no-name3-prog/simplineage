@@ -5,7 +5,7 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Core model, import, graph, analysis, SQLite storage, and **professional CLI**. HTML/export visualization still evolving.
+> **Status:** Core model, import, graph, analysis, SQLite storage, professional CLI, and **offline interactive HTML lineage reports**.
 
 [![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -41,7 +41,7 @@ docker compose --profile dev run --rm dev
 - Impact analysis, cycle detection, orphan discovery, quality checks
 - Lightweight SQLite metadata store (offline-first)
 - Professional CLI (`import`, `build`, `search`, `upstream`, `downstream`, `impact`, `validate`, `stats`, `compare`, `export`)
-- Offline HTML / GraphML / CSV export
+- Offline interactive HTML lineage reports (pan/zoom/search/impact/dark mode/SVG+Mermaid) plus GraphML / CSV / Mermaid export
 - Language bindings (Python, Node) — planned
 
 See [docs/cli.md](docs/cli.md) for the full command reference.

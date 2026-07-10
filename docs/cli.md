@@ -117,14 +117,20 @@ Write artifacts for tooling / review.
 | `objects-csv` | Catalog objects |
 | `edges-csv` | Dependency edges |
 | `graphml` | Desktop graph tools |
-| `html` | Offline HTML summary |
+| `html` | **Interactive offline lineage report** (pan/zoom/search/filters/impact/dark mode/SVG+Mermaid download) |
+| `mermaid` | Mermaid flowchart text (`.mmd`) |
 | `analysis` | Full analysis report JSON |
 
 ```bash
+# Self-contained HTML — open in any browser, no server
 simplineage export -f html -o report.html
+
+simplineage export -f mermaid -o lineage.mmd
 simplineage export -f graphml -o lineage.graphml
 simplineage export --analysis -o full.json
 ```
+
+See [html-export.md](html-export.md) for the interactive report features.
 
 ### Compatibility
 

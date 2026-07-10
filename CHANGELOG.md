@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 7 offline interactive HTML lineage report: pan/zoom, search, filters, metadata panel, client-side impact analysis, dark mode, SVG + Mermaid export (no server); `export -f mermaid`
 - Phase 6 professional CLI (`simplineage`): clap subcommands import/build/search/upstream/downstream/impact/validate/stats/compare/export with colored output, progress bars, JSON mode, and exporters (JSON/CSV/GraphML/HTML/analysis)
 - BigQuery INFORMATION_SCHEMA CSV demo (`examples/bigquery_information_schema`) with table_catalog/table_type/is_nullable mapping, directory merge + FQN reconcile
 - Phase 5 SQLite storage: snapshots, incremental imports, materialized edges, migrations, benchmarks

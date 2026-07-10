@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/simplineage-core",
     "crates/simplineage-importers",
+    "crates/simplineage-importer-sample",
     "crates/simplineage-storage",
     "crates/simplineage-analysis",
     "crates/simplineage-exporters",
@@ -29,6 +30,7 @@ categories = ["data-structures", "command-line-utilities"]
 # Internal crates
 simplineage-core = { path = "crates/simplineage-core", version = "0.1.0" }
 simplineage-importers = { path = "crates/simplineage-importers", version = "0.1.0" }
+simplineage-importer-sample = { path = "crates/simplineage-importer-sample", version = "0.1.0" }
 simplineage-storage = { path = "crates/simplineage-storage", version = "0.1.0" }
 simplineage-analysis = { path = "crates/simplineage-analysis", version = "0.1.0" }
 simplineage-exporters = { path = "crates/simplineage-exporters", version = "0.1.0" }
@@ -45,6 +47,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 clap = { version = "4", features = ["derive", "env"] }
 config = "0.15"
+csv = "1"
+calamine = "0.36"
+parquet = { version = "54", default-features = false, features = ["arrow", "snap", "zstd"] }
+arrow-array = "54"
+arrow-schema = "54"
+arrow-cast = "54"
 
 [profile.release]
 lto = true

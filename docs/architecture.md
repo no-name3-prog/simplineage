@@ -92,6 +92,7 @@ Structured logging uses [`tracing`](https://docs.rs/tracing) with
 | Cargo workspace & crates | Scaffolded |
 | Config & logging | Implemented in core |
 | Core metadata model | Implemented (Phase 1) |
+| Import framework (CSV/JSON/Parquet/Excel) | Implemented |
 | Hello World CLI | Implemented |
 | Importers / storage / analysis / exporters | Placeholders only |
 | Server / web / language bindings | Placeholders only |

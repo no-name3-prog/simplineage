@@ -88,7 +88,7 @@ impl Analyzer {
         &mut self.graph
     }
 
-    /// Downstream impact: all dependents of `node_id` (string form of [`ObjectId`]).
+    /// Downstream impact: all dependents of `node_id` (string form of [`simplineage_core::ObjectId`]).
     pub fn impact_downstream(&self, node_id: &str) -> Result<Vec<String>> {
         let id = simplineage_core::ObjectId::from_trusted(node_id);
         Ok(self

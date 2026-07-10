@@ -91,6 +91,7 @@ Structured logging uses [`tracing`](https://docs.rs/tracing) with
 |------|--------|
 | Cargo workspace & crates | Scaffolded |
 | Config & logging | Implemented in core |
+| Core metadata model | Implemented (Phase 1) |
 | Hello World CLI | Implemented |
 | Importers / storage / analysis / exporters | Placeholders only |
 | Server / web / language bindings | Placeholders only |
@@ -110,4 +111,8 @@ Structured logging uses [`tracing`](https://docs.rs/tracing) with
 
 - Prefer **safe Rust** (`forbid(unsafe_code)` at crate roots unless FFI requires otherwise).  
 - Keep public APIs documented (`missing_docs` warnings on library crates).  
-- Workspace-level dependency versions in the root `Cargo.toml` avoid version skew.  
+- Workspace-level dependency versions in the root `Cargo.toml` avoid version skew.
+
+## Metadata model
+
+See [metadata-model.md](metadata-model.md) for the vendor-agnostic catalog types.

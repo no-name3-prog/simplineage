@@ -86,6 +86,78 @@ make check          # light local: fmt + clippy + test + doc
 # Full suite: open a pull request (CI Success)
 ```
 
+## Quick usage
+
+Use sample data from this repo to try lineage end-to-end: **import → HTML report → open in browser**. No server is required.
+
+You need Rust (via [rustup](https://rustup.rs/)). From the repo root:
+
+### 1. Production-style demo (recommended)
+
+A multi-layer warehouse graph (`raw → staging → marts → metrics → serving`), closer to real data-engineering setups.
+
+```bash
+# Import the sample metadata into a local store
+cargo run -q -p simplineage-cli -- \
+  --data-dir .simplineage \
+  --no-progress \
+  import examples/production_warehouse_lineage \
+  --label prod-demo
+
+# Build an offline interactive HTML report
+cargo run -q -p simplineage-cli -- \
+  --data-dir .simplineage \
+  --no-progress \
+  export -f html -o lineage.html
+
+# Open the file in your browser (macOS)
+open lineage.html
+# Linux: xdg-open lineage.html
+```
+
+In the HTML page you can zoom, pan, search tables, filter kinds, click a node for details, run upstream/downstream impact, toggle dark mode, and download SVG or Mermaid.
+
+More detail: [examples/production_warehouse_lineage/README.md](examples/production_warehouse_lineage/README.md).
+
+### 2. Smaller BigQuery-style demo
+
+CSV dumps shaped like BigQuery `INFORMATION_SCHEMA` (tables, columns, lineage).
+
+```bash
+cargo run -q -p simplineage-cli -- \
+  --data-dir .simplineage \
+  --no-progress \
+  import examples/bigquery_information_schema \
+  --label bq-demo
+
+cargo run -q -p simplineage-cli -- \
+  --data-dir .simplineage \
+  --no-progress \
+  export -f html -o lineage-bq.html
+
+open lineage-bq.html
+```
+
+More detail: [examples/bigquery_information_schema/README.md](examples/bigquery_information_schema/README.md).
+
+### 3. Your own files
+
+Point `import` at any folder or file (CSV, JSON, Parquet, Excel). Same export step:
+
+```bash
+cargo run -q -p simplineage-cli -- \
+  --data-dir .simplineage \
+  import /path/to/your/metadata_export
+
+cargo run -q -p simplineage-cli -- \
+  --data-dir .simplineage \
+  export -f html -o lineage.html
+```
+
+Optional: Mermaid text (`export -f mermaid -o lineage.mmd`), search (`search orders`), impact (`impact orders --direction both`).
+
+Full CLI: [docs/cli.md](docs/cli.md) · HTML report features: [docs/html-export.md](docs/html-export.md).
+
 ## Workspace crates
 
 | Crate | Role |
@@ -108,12 +180,15 @@ Default: [`config/default.toml`](config/default.toml). Override with
 
 - [Contributing](CONTRIBUTING.md) — **CI-first** workflow  
 - [Governance](docs/GOVERNANCE.md) — **PR-only** process for every phase  
+- [CLI](docs/cli.md) — command reference  
+- [HTML export](docs/html-export.md) — offline interactive lineage report  
 - [Metadata model](docs/metadata-model.md) — vendor-agnostic catalog types  
 - [Importers](docs/importers.md) — plugin import framework  
 - [Graph engine](docs/graph-engine.md) — lineage traversal & stats  
 - [Analysis engine](docs/analysis-engine.md) — impact, quality, criticality  
-- [Storage](docs/storage.md) — DuckDB persistence  
+- [Storage](docs/storage.md) — local SQLite persistence  
 - [Development](docs/development.md)  
+- [Examples](examples/) — sample metadata dumps for demos  
 - [Code of Conduct](CODE_OF_CONDUCT.md)  
 - [Security](SECURITY.md)  
 - [Changelog](CHANGELOG.md)

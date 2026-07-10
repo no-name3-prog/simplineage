@@ -1,6 +1,6 @@
 [package]
 name = "simplineage-storage"
-description = "Local storage backends (DuckDB/SQLite) for SimpLineage"
+description = "Local SQLite metadata persistence for SimpLineage"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,3 +15,16 @@ simplineage-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+simplineage-analysis = { path = "../simplineage-analysis" }
+
+[[bench]]
+name = "storage_bench"
+harness = false

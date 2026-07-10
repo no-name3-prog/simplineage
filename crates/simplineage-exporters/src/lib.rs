@@ -1,11 +1,71 @@
-//! Exporters for lineage artifacts (HTML, JSON, GraphML, etc.).
+//! Exporters for lineage artifacts (JSON, CSV, GraphML, HTML).
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
+use std::fs;
+use std::io::Write;
 use std::path::Path;
 
-use simplineage_core::Result;
+use simplineage_core::{Error, Result, Snapshot};
+
+/// Supported export formats for CLI and library callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportFormat {
+    /// Compact snapshot JSON.
+    Json,
+    /// Pretty-printed snapshot JSON.
+    JsonPretty,
+    /// One catalog object per CSV row.
+    ObjectsCsv,
+    /// One dependency edge per CSV row.
+    EdgesCsv,
+    /// GraphML for desktop graph tools.
+    GraphMl,
+    /// Minimal offline HTML summary.
+    Html,
+}
+
+impl ExportFormat {
+    /// Parse a format name (case-insensitive).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "json" => Some(Self::Json),
+            "json-pretty" | "json_pretty" | "pretty" => Some(Self::JsonPretty),
+            "objects-csv" | "objects_csv" | "csv" => Some(Self::ObjectsCsv),
+            "edges-csv" | "edges_csv" | "edges" => Some(Self::EdgesCsv),
+            "graphml" | "graph-ml" => Some(Self::GraphMl),
+            "html" => Some(Self::Html),
+            _ => None,
+        }
+    }
+
+    /// Canonical CLI name.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::JsonPretty => "json-pretty",
+            Self::ObjectsCsv => "objects-csv",
+            Self::EdgesCsv => "edges-csv",
+            Self::GraphMl => "graphml",
+            Self::Html => "html",
+        }
+    }
+
+    /// All format names (for help text).
+    #[must_use]
+    pub fn all_names() -> &'static [&'static str] {
+        &[
+            "json",
+            "json-pretty",
+            "objects-csv",
+            "edges-csv",
+            "graphml",
+            "html",
+        ]
+    }
+}
 
 /// Trait for export backends.
 pub trait Exporter: Send + Sync {
@@ -16,9 +76,246 @@ pub trait Exporter: Send + Sync {
     fn export(&self, path: &Path) -> Result<()>;
 }
 
-/// Placeholder HTML exporter.
+/// Export a [`Snapshot`] to `path` in the given format.
+pub fn export_snapshot(snapshot: &Snapshot, path: &Path, format: ExportFormat) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+    }
+
+    match format {
+        ExportFormat::Json => {
+            let json = snapshot.to_json()?;
+            fs::write(path, json).map_err(Error::Io)?;
+        }
+        ExportFormat::JsonPretty => {
+            let json = snapshot.to_json_pretty()?;
+            fs::write(path, json).map_err(Error::Io)?;
+        }
+        ExportFormat::ObjectsCsv => write_objects_csv(snapshot, path)?,
+        ExportFormat::EdgesCsv => write_edges_csv(snapshot, path)?,
+        ExportFormat::GraphMl => write_graphml(snapshot, path)?,
+        ExportFormat::Html => write_html_summary(snapshot, path)?,
+    }
+
+    tracing::info!(?path, format = format.as_str(), "exported snapshot");
+    Ok(())
+}
+
+/// Write arbitrary JSON (e.g. analysis report) to a path.
+pub fn write_json_value<T: serde::Serialize>(value: &T, path: &Path, pretty: bool) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+    }
+    let json = if pretty {
+        serde_json::to_string_pretty(value)?
+    } else {
+        serde_json::to_string(value)?
+    };
+    fs::write(path, json).map_err(Error::Io)?;
+    Ok(())
+}
+
+fn write_objects_csv(snapshot: &Snapshot, path: &Path) -> Result<()> {
+    let mut f = fs::File::create(path).map_err(Error::Io)?;
+    writeln!(f, "id,kind,fqn,name,description").map_err(Error::Io)?;
+    for (id, obj) in snapshot.object_index() {
+        let meta = obj.meta();
+        let desc = meta
+            .description
+            .as_deref()
+            .unwrap_or("")
+            .replace('"', "\"\"");
+        writeln!(
+            f,
+            "{},{},{},{},\"{}\"",
+            csv_escape(id.as_str()),
+            obj.kind_name(),
+            csv_escape(&meta.fqn.to_dotted()),
+            csv_escape(&meta.name),
+            desc
+        )
+        .map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+fn write_edges_csv(snapshot: &Snapshot, path: &Path) -> Result<()> {
+    let mut f = fs::File::create(path).map_err(Error::Io)?;
+    writeln!(f, "id,from_id,to_id,kind,level").map_err(Error::Io)?;
+    for dep in &snapshot.dependencies {
+        let kind = match &dep.kind {
+            simplineage_core::model::graph::DependencyKind::ViewDefinition => "view_definition",
+            simplineage_core::model::graph::DependencyKind::Pipeline => "pipeline",
+            simplineage_core::model::graph::DependencyKind::ForeignKey => "foreign_key",
+            simplineage_core::model::graph::DependencyKind::Manual => "manual",
+            simplineage_core::model::graph::DependencyKind::Inferred => "inferred",
+            simplineage_core::model::graph::DependencyKind::Other(s) => s.as_str(),
+        };
+        let level = match dep.level {
+            simplineage_core::model::graph::DependencyLevel::Relation => "relation",
+            simplineage_core::model::graph::DependencyLevel::Column => "column",
+            simplineage_core::model::graph::DependencyLevel::Unknown => "unknown",
+        };
+        writeln!(
+            f,
+            "{},{},{},{},{}",
+            csv_escape(dep.id.as_str()),
+            csv_escape(dep.from_id.as_str()),
+            csv_escape(dep.to_id.as_str()),
+            kind,
+            level
+        )
+        .map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+fn write_graphml(snapshot: &Snapshot, path: &Path) -> Result<()> {
+    let mut f = fs::File::create(path).map_err(Error::Io)?;
+    writeln!(
+        f,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="fqn" for="node" attr.name="fqn" attr.type="string"/>
+  <key id="edge_kind" for="edge" attr.name="kind" attr.type="string"/>
+  <graph id="lineage" edgedefault="directed">"#
+    )
+    .map_err(Error::Io)?;
+
+    let index = snapshot.object_index();
+    // Nodes from catalog + edge endpoints
+    let mut seen = std::collections::BTreeSet::new();
+    for (id, obj) in &index {
+        seen.insert(id.as_str().to_string());
+        let kind = obj.kind_name();
+        let fqn = obj.meta().fqn.to_dotted();
+        writeln!(
+            f,
+            r#"    <node id="{}"><data key="kind">{}</data><data key="fqn">{}</data></node>"#,
+            xml_escape(id.as_str()),
+            xml_escape(kind),
+            xml_escape(&fqn)
+        )
+        .map_err(Error::Io)?;
+    }
+    for dep in &snapshot.dependencies {
+        for endpoint in [&dep.from_id, &dep.to_id] {
+            if seen.insert(endpoint.as_str().to_string()) {
+                writeln!(
+                    f,
+                    r#"    <node id="{}"><data key="kind">unknown</data><data key="fqn">{}</data></node>"#,
+                    xml_escape(endpoint.as_str()),
+                    xml_escape(endpoint.as_str())
+                )
+                .map_err(Error::Io)?;
+            }
+        }
+        let kind = dep_kind_label(&dep.kind);
+        writeln!(
+            f,
+            r#"    <edge id="{}" source="{}" target="{}"><data key="edge_kind">{}</data></edge>"#,
+            xml_escape(dep.id.as_str()),
+            xml_escape(dep.from_id.as_str()),
+            xml_escape(dep.to_id.as_str()),
+            xml_escape(kind)
+        )
+        .map_err(Error::Io)?;
+    }
+    writeln!(f, "  </graph>\n</graphml>").map_err(Error::Io)?;
+    Ok(())
+}
+
+fn dep_kind_label(kind: &simplineage_core::model::graph::DependencyKind) -> &str {
+    match kind {
+        simplineage_core::model::graph::DependencyKind::ViewDefinition => "view_definition",
+        simplineage_core::model::graph::DependencyKind::Pipeline => "pipeline",
+        simplineage_core::model::graph::DependencyKind::ForeignKey => "foreign_key",
+        simplineage_core::model::graph::DependencyKind::Manual => "manual",
+        simplineage_core::model::graph::DependencyKind::Inferred => "inferred",
+        simplineage_core::model::graph::DependencyKind::Other(s) => s.as_str(),
+    }
+}
+
+fn write_html_summary(snapshot: &Snapshot, path: &Path) -> Result<()> {
+    let mut f = fs::File::create(path).map_err(Error::Io)?;
+    let label = snapshot.label.as_deref().unwrap_or("(unlabeled)");
+    writeln!(
+        f,
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>SimpLineage — {label}</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }}
+    h1 {{ font-size: 1.4rem; }}
+    table {{ border-collapse: collapse; margin-top: 1rem; }}
+    th, td {{ border: 1px solid #ddd; padding: 0.4rem 0.75rem; text-align: left; }}
+    th {{ background: #f4f4f5; }}
+    .muted {{ color: #666; }}
+  </style>
+</head>
+<body>
+  <h1>SimpLineage snapshot</h1>
+  <p class="muted">id: {id} · model: {model} · objects: {objs} · edges: {edges}</p>
+  <h2>Catalog summary</h2>
+  <table>
+    <tr><th>Kind</th><th>Count</th></tr>
+    <tr><td>tables</td><td>{tables}</td></tr>
+    <tr><td>views</td><td>{views}</td></tr>
+    <tr><td>materialized_views</td><td>{mvs}</td></tr>
+    <tr><td>columns</td><td>{columns}</td></tr>
+    <tr><td>dependencies</td><td>{edges}</td></tr>
+  </table>
+  <p class="muted">Generated offline by SimpLineage.</p>
+</body>
+</html>"#,
+        label = html_escape(label),
+        id = html_escape(snapshot.id.as_str()),
+        model = html_escape(snapshot.model_version.as_str()),
+        objs = snapshot.object_count(),
+        edges = snapshot.dependencies.len(),
+        tables = snapshot.tables.len(),
+        views = snapshot.views.len(),
+        mvs = snapshot.materialized_views.len(),
+        columns = snapshot.columns.len(),
+    )
+    .map_err(Error::Io)?;
+    Ok(())
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Placeholder HTML exporter (trait object form).
 #[derive(Debug, Default)]
-pub struct HtmlExporter;
+pub struct HtmlExporter {
+    /// Snapshot to export.
+    pub snapshot: Option<Snapshot>,
+}
 
 impl Exporter for HtmlExporter {
     fn name(&self) -> &str {
@@ -26,17 +323,75 @@ impl Exporter for HtmlExporter {
     }
 
     fn export(&self, path: &Path) -> Result<()> {
-        tracing::debug!(?path, "html export stub");
-        Ok(())
+        let snap = self
+            .snapshot
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(Snapshot::new);
+        export_snapshot(&snap, path, ExportFormat::Html)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use simplineage_core::ObjectId;
+    use simplineage_core::model::graph::{Dependency, DependencyKind, DependencyLevel};
+    use simplineage_core::model::ids::FullyQualifiedName;
+    use simplineage_core::model::objects::{ObjectMeta, Table};
+
+    fn sample() -> Snapshot {
+        let mut s = Snapshot::new();
+        s.tables.push(Table {
+            meta: ObjectMeta::new(
+                ObjectId::from_trusted("t1"),
+                FullyQualifiedName::parse_dotted("db.public.orders").unwrap(),
+            ),
+            schema_id: None,
+            column_ids: vec![],
+        });
+        s.dependencies.push(Dependency {
+            id: ObjectId::from_trusted("d1"),
+            from_id: ObjectId::from_trusted("t1"),
+            to_id: ObjectId::from_trusted("t2"),
+            kind: DependencyKind::ViewDefinition,
+            level: DependencyLevel::Relation,
+            confidence: None,
+            attributes: Default::default(),
+        });
+        s
+    }
 
     #[test]
-    fn html_exporter_name() {
-        assert_eq!(HtmlExporter.name(), "html");
+    fn export_json_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("sl-export-{}", uuid_stub()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("snap.json");
+        let snap = sample();
+        export_snapshot(&snap, &path, ExportFormat::JsonPretty).unwrap();
+        let loaded = Snapshot::from_json(fs::read(&path).unwrap()).unwrap();
+        assert_eq!(loaded.tables.len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_csv_and_graphml() {
+        let dir = std::env::temp_dir().join(format!("sl-export2-{}", uuid_stub()));
+        let _ = fs::create_dir_all(&dir);
+        let snap = sample();
+        export_snapshot(&snap, &dir.join("o.csv"), ExportFormat::ObjectsCsv).unwrap();
+        export_snapshot(&snap, &dir.join("e.csv"), ExportFormat::EdgesCsv).unwrap();
+        export_snapshot(&snap, &dir.join("g.graphml"), ExportFormat::GraphMl).unwrap();
+        export_snapshot(&snap, &dir.join("h.html"), ExportFormat::Html).unwrap();
+        assert!(dir.join("o.csv").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn uuid_stub() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
     }
 }

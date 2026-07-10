@@ -52,3 +52,6 @@ target/llvm-cov-target/
 target/criterion/
 lcov.info
 cobertura.xml
+
+# Local CLI metadata store
+.simplineage/

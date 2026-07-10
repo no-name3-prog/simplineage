@@ -21,7 +21,7 @@ and generates interactive offline reports.
 ## Pipeline
 
 ```text
-Importers → Normalizer → Storage (DuckDB/SQLite)
+Importers → Normalizer → Storage (SQLite)
                               ↓
                         Graph Engine
                               ↓

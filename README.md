@@ -5,8 +5,7 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Phase 0.3 — repository governance & PR-only development workflow. Application logic is still
-> scaffolding; quality gates and collaboration workflow are ready.
+> **Status:** Phase 1 — core metadata model in `simplineage-core`. Importers and graph analysis still upcoming.
 
 [![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -104,6 +103,7 @@ Default: [`config/default.toml`](config/default.toml). Override with
 
 - [Contributing](CONTRIBUTING.md) — **CI-first** workflow  
 - [Governance](docs/GOVERNANCE.md) — **PR-only** process for every phase  
+- [Metadata model](docs/metadata-model.md) — vendor-agnostic catalog types  
 - [Development](docs/development.md)  
 - [Code of Conduct](CODE_OF_CONDUCT.md)  
 - [Security](SECURITY.md)  

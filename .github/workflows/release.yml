@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-binaries:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build
+        run: cargo build --release -p simplineage-cli --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          BIN="target/${{ matrix.target }}/release/simplineage"
+          STAGE="simplineage-${VERSION}-${{ matrix.target }}"
+          mkdir -p "$STAGE"
+          cp "$BIN" "$STAGE/"
+          cp README.md LICENSE LICENSE-MIT LICENSE-APACHE "$STAGE/" 2>/dev/null || true
+          tar -czf "${STAGE}.tar.gz" "$STAGE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simplineage-${{ matrix.target }}
+          path: simplineage-*.tar.gz
+
+  github-release:
+    name: GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

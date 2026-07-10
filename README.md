@@ -5,10 +5,34 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Phase 0.1 — repository foundation. Core engine features are not
-> implemented yet; the workspace, CLI stub, config, and logging are in place.
+> **Status:** Phase 0.2 — engineering standards & CI. Application logic is still
+> scaffolding; quality gates and collaboration workflow are ready.
 
+[![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](rust-toolchain.toml)
+
+## Contribute without heavy local installs
+
+| You want… | You need… |
+|-----------|-----------|
+| Open a PR and let quality gates run | git + GitHub |
+| Build/run the CLI locally | [rustup](https://rustup.rs/) only |
+| Full CI tools without polluting the host | **Docker** or **Codespaces** / Dev Container |
+| Match CI on bare metal | optional (not required) — see [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+**GitHub Actions is the source of truth.** Every PR runs rustfmt, Clippy, nextest,
+rustdoc, cargo-deny, cargo-audit, coverage, and Docker, then aggregates under
+**CI Success**.
+
+```bash
+# Optional light local smoke (rustup only)
+cargo test --workspace
+cargo run -p simplineage-cli -- hello
+
+# Optional full tools in Docker (no cargo install on host)
+docker compose --profile dev run --rm dev
+```
 
 ## Features (planned)
 
@@ -25,50 +49,37 @@ and produces interactive offline reports — without requiring a cloud control p
 Importers → Normalizer → Storage → Graph Engine → Analysis → CLI / Server / UI
 ```
 
-See [docs/architecture.md](docs/architecture.md) for crate layout and design rules.
+See [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) 1.85+ (stable toolchain; see `rust-toolchain.toml`)
+- **Minimum:** git  
+- **Optional local build:** Rust 1.85+ via rustup  
+- **Optional full tooling:** Docker (see `Dockerfile.dev`)
 
-### Build
+### Build & run (optional local Rust)
 
 ```bash
 git clone https://github.com/no-name3-prog/simplineage.git
 cd simplineage
 cargo build
+cargo run -p simplineage-cli -- hello --name engineer
 ```
 
-### Run the CLI
+### Docker runtime image
 
 ```bash
-# Hello World (default command)
-cargo run -p simplineage-cli
-
-# Explicit hello
-cargo run -p simplineage-cli -- hello --name engineer
-
-# Version / status
-cargo run -p simplineage-cli -- version
-cargo run -p simplineage-cli -- status
-
-# After `cargo install --path crates/simplineage-cli`:
-simplineage hello
+docker compose build
+docker compose run --rm simplineage
 ```
 
 ### Tests
 
 ```bash
-cargo test --workspace
-```
-
-### Lints (recommended)
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+make check          # light local: fmt + clippy + test + doc
+# Full suite: open a pull request (CI Success)
 ```
 
 ## Workspace crates
@@ -84,50 +95,24 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `simplineage-server` | HTTP API (placeholder) |
 | `simplineage-bindings` | FFI / language bindings (placeholder) |
 
-Also reserved: `web/` (frontend), `bindings/` (packaging for other languages).
-
 ## Configuration
 
-Default file: [`config/default.toml`](config/default.toml).
+Default: [`config/default.toml`](config/default.toml). Override with
+`SIMPLINEAGE_*` env vars (nested via `__`) or `RUST_LOG`.
 
-| Key | Env override | Default |
-|-----|--------------|---------|
-| `logging.level` | `SIMPLINEAGE_LOGGING__LEVEL` | `info` |
-| `logging.format` | `SIMPLINEAGE_LOGGING__FORMAT` | `text` |
-| `storage.data_dir` | `SIMPLINEAGE_STORAGE__DATA_DIR` | `.simplineage` |
-| `server.host` | `SIMPLINEAGE_SERVER__HOST` | `127.0.0.1` |
-| `server.port` | `SIMPLINEAGE_SERVER__PORT` | `8080` |
+## Project docs
 
-`RUST_LOG` is honored when set.
+- [Contributing](CONTRIBUTING.md) — **CI-first** workflow  
+- [Development](docs/development.md)  
+- [Code of Conduct](CODE_OF_CONDUCT.md)  
+- [Security](SECURITY.md)  
+- [Changelog](CHANGELOG.md)
 
-## Project layout
+## Semantic versioning
 
-```text
-crates/          Rust workspace members
-config/          Default configuration
-docs/            Architecture and design docs
-web/             Frontend placeholder
-bindings/        Multi-language packaging placeholder
-```
-
-## Contributing
-
-This project uses a **pull-request workflow**:
-
-1. Create a feature branch from `main` (do not push directly to `main`).
-2. Implement changes with tests where practical.
-3. Open a PR; address review feedback.
-4. Merge only after checks pass and review is approved (squash merge preferred).
+[SemVer](https://semver.org/). Tag `vX.Y.Z` on `main` to trigger the release
+workflow. Details in CONTRIBUTING.
 
 ## License
 
-Licensed under either of:
-
-- [MIT License](LICENSE-MIT)
-- [Apache License, Version 2.0](LICENSE-APACHE)
-
-at your option.
-
-## Acknowledgments
-
-Inspired by the needs of data platform engineers who want lineage that works on a laptop, from exports they already have.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.

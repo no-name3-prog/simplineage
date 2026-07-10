@@ -45,3 +45,10 @@ web/out/
 # Benchmarks / profiling
 flamegraph.svg
 perf.data*
+
+# Coverage / criterion (local or CI artifacts)
+target/llvm-cov/
+target/llvm-cov-target/
+target/criterion/
+lcov.info
+cobertura.xml

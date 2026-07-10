@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1.7
+# Full engineering toolchain in a container — use this instead of host cargo installs.
+#   docker compose --profile dev run --rm dev
+#   # or: docker build -f Dockerfile.dev -t simplineage-dev .
+
+FROM rust:bookworm
+
+RUN rustup component add rustfmt clippy llvm-tools-preview rust-src \
+    && cargo install cargo-nextest cargo-llvm-cov cargo-deny cargo-audit --locked
+
+WORKDIR /workspace
+# Don't COPY source for compose bind-mount workflow; image only provides tools.
+CMD ["bash"]

@@ -1,43 +1,61 @@
-//! Metadata importers for SimpLineage.
+//! Plugin-based metadata import framework for SimpLineage.
 //!
-//! Future phases will add CSV, JSON, Excel, Parquet, and warehouse-specific
-//! plugins behind a common [`Importer`] trait.
+//! # Overview
+//!
+//! - [`MetadataImporter`] — trait implemented by each plugin
+//! - [`ImporterRegistry`] — registration + **auto-detection** + import
+//! - Built-in format plugins: CSV, JSON, Parquet, Excel
+//! - Warehouse plugins live in **separate crates** and call
+//!   [`ImporterRegistry::register`]
+//!
+//! # Example
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use simplineage_importers::{ImporterRegistry, ImportOptions};
+//!
+//! let registry = ImporterRegistry::with_builtins();
+//! let snap = registry
+//!     .import_path(Path::new("./metadata.json"), &ImportOptions::default())
+//!     .unwrap();
+//! assert!(!snap.tables.is_empty() || !snap.columns.is_empty() || snap.object_count() >= 0);
+//! ```
+//!
+//! # Adding a warehouse
+//!
+//! 1. Create a new crate (e.g. `simplineage-importer-snowflake`)
+//! 2. Depend on `simplineage-importers` + `simplineage-core`
+//! 3. Implement [`MetadataImporter`]
+//! 4. Expose `pub fn register(registry: &mut ImporterRegistry)`
+//!
+//! No changes to core or format importers are required.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
-use simplineage_core::Result;
+pub mod detect;
+pub mod formats;
+#[allow(missing_docs)]
+pub mod intermediate;
+pub mod normalize;
+pub mod options;
+pub mod plugin;
+pub mod registry;
 
-/// Trait implemented by metadata importers.
-pub trait Importer: Send + Sync {
-    /// Stable importer identifier (e.g. `"csv"`, `"snowflake-export"`).
-    fn name(&self) -> &str;
+pub use formats::{CsvImporter, ExcelImporter, JsonImporter, ParquetImporter};
+pub use intermediate::{
+    IntermediateCatalog, IntermediateColumn, IntermediateDependency, IntermediateRelationship,
+    IntermediateTable,
+};
+pub use normalize::{intermediate_to_snapshot, parse_data_type};
+pub use options::ImportOptions;
+pub use plugin::{DetectConfidence, MetadataImporter};
+pub use registry::{DetectResult, ImporterRegistry};
 
-    /// Import metadata from the given path into the storage layer.
-    fn import(&self, path: &std::path::Path) -> Result<()>;
-}
-
-/// Placeholder no-op importer used until real plugins land.
-#[derive(Debug, Default)]
-pub struct StubImporter;
-
-impl Importer for StubImporter {
-    fn name(&self) -> &str {
-        "stub"
-    }
-
-    fn import(&self, path: &std::path::Path) -> Result<()> {
-        tracing::debug!(?path, importer = self.name(), "stub import (no-op)");
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stub_importer_name() {
-        assert_eq!(StubImporter.name(), "stub");
-    }
+/// Register all built-in format importers into an existing registry.
+pub fn register_builtins(registry: &mut ImporterRegistry) {
+    registry.register(Box::new(CsvImporter));
+    registry.register(Box::new(JsonImporter));
+    registry.register(Box::new(ParquetImporter));
+    registry.register(Box::new(ExcelImporter));
 }

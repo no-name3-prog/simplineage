@@ -25,6 +25,10 @@ pub enum Error {
         supported: String,
     },
 
+    /// Metadata import failed.
+    #[error("import error: {0}")]
+    Import(String),
+
     /// Serialization or deserialization failed.
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
@@ -42,5 +46,10 @@ impl Error {
     /// Build a validation error from a message.
     pub fn validation(msg: impl Into<String>) -> Self {
         Self::Validation(msg.into())
+    }
+
+    /// Build an import error from a message.
+    pub fn import(msg: impl Into<String>) -> Self {
+        Self::Import(msg.into())
     }
 }

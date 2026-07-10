@@ -1,6 +1,6 @@
 [package]
 name = "simplineage-importers"
-description = "Metadata importers and plugin interface for SimpLineage"
+description = "Plugin-based metadata import framework for SimpLineage"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,3 +15,14 @@ simplineage-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+calamine.workspace = true
+parquet.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+arrow-cast.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

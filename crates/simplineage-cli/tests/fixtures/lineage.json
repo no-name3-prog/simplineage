@@ -1,0 +1,56 @@
+{
+  "id": "snap-fixture-1",
+  "model_version": "1.0.0",
+  "label": "cli-fixture",
+  "source": "test",
+  "tables": [
+    {
+      "id": "table:orders",
+      "fqn": {
+        "parts": [
+          "public",
+          "orders"
+        ]
+      },
+      "name": "orders"
+    },
+    {
+      "id": "table:order_facts",
+      "fqn": {
+        "parts": [
+          "mart",
+          "order_facts"
+        ]
+      },
+      "name": "order_facts"
+    }
+  ],
+  "views": [
+    {
+      "id": "view:order_summary",
+      "fqn": {
+        "parts": [
+          "mart",
+          "order_summary"
+        ]
+      },
+      "name": "order_summary"
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "dep:1",
+      "from_id": "table:orders",
+      "to_id": "table:order_facts",
+      "kind": "view_definition",
+      "level": "relation"
+    },
+    {
+      "id": "dep:2",
+      "from_id": "table:order_facts",
+      "to_id": "view:order_summary",
+      "kind": "view_definition",
+      "level": "relation"
+    }
+  ]
+}

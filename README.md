@@ -5,7 +5,7 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Core model, import, graph, analysis, and **SQLite storage**. Visualization still upcoming.
+> **Status:** Core model, import, graph, analysis, SQLite storage, and **professional CLI**. HTML/export visualization still evolving.
 
 [![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -33,14 +33,18 @@ cargo run -p simplineage-cli -- hello
 docker compose --profile dev run --rm dev
 ```
 
-## Features (planned)
+## Features
 
-- Plugin-based metadata importers (CSV, JSON, Excel, Parquet, warehouses)
+- Plugin-based metadata importers (CSV, JSON, Excel, Parquet, sample warehouse)
 - Normalized common metadata model
 - Directed lineage graph with upstream / downstream traversal
-- Impact analysis, cycle detection, orphan discovery
-- Offline HTML visualization and CLI workflows
-- Language bindings (Python, Node) on top of a Rust core
+- Impact analysis, cycle detection, orphan discovery, quality checks
+- Lightweight SQLite metadata store (offline-first)
+- Professional CLI (`import`, `build`, `search`, `upstream`, `downstream`, `impact`, `validate`, `stats`, `compare`, `export`)
+- Offline HTML / GraphML / CSV export
+- Language bindings (Python, Node) — planned
+
+See [docs/cli.md](docs/cli.md) for the full command reference.
 
 ## Architecture
 
@@ -64,6 +68,7 @@ See [docs/architecture.md](docs/architecture.md).
 git clone https://github.com/no-name3-prog/simplineage.git
 cd simplineage
 cargo build
+cargo run -p simplineage-cli -- --help
 cargo run -p simplineage-cli -- hello --name engineer
 ```
 

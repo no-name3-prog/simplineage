@@ -1,51 +1,102 @@
 //! SimpLineage command-line interface.
+//!
+//! Professional offline CLI for metadata import, lineage graph analysis,
+//! validation, comparison, and export.
+
+mod commands;
+mod context;
+mod output;
+mod progress;
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
-use simplineage_analysis::{AnalysisEngine, ImpactDirection, ImpactOptions};
-use simplineage_core::{Engine, PRODUCT_NAME, Settings, VERSION, init_tracing};
-use simplineage_importers::{ImportOptions, ImporterRegistry};
-use simplineage_storage::{ImportMode, MetadataStore};
+use clap::{Parser, Subcommand, ValueEnum};
+use simplineage_core::{PRODUCT_NAME, Settings, VERSION, init_tracing};
+
+use crate::commands::{
+    build::BuildArgs,
+    compare::CompareArgs,
+    export::ExportArgs,
+    import::ImportArgs,
+    lineage::{ImpactArgs, LineageArgs},
+    search::SearchArgs,
+    stats::StatsArgs,
+    validate::ValidateArgs,
+};
+use crate::context::{AppContext, DEFAULT_DATA_DIR};
+use crate::output::OutputStyle;
 
 /// SimpLineage — offline-first metadata lineage for data engineers.
 #[derive(Debug, Parser)]
 #[command(
     name = "simplineage",
     version = VERSION,
-    about = "Offline-first metadata intelligence SDK for data lineage",
-    long_about = None
+    about = "Offline-first metadata intelligence for data lineage",
+    long_about = "SimpLineage imports warehouse metadata exports, builds a local lineage graph,\n\
+                  and runs impact analysis — fully offline.\n\n\
+                  Typical workflow:\n  \
+                  simplineage import ./export.csv\n  \
+                  simplineage build --full\n  \
+                  simplineage search orders\n  \
+                  simplineage impact public.orders --direction both\n  \
+                  simplineage export -f html -o report.html",
+    propagate_version = true,
+    arg_required_else_help = true,
+    styles = clap_styles()
 )]
 struct Cli {
     /// Path to a configuration directory containing default.toml / local.toml.
-    #[arg(long, global = true, default_value = "config")]
+    #[arg(
+        long,
+        global = true,
+        default_value = "config",
+        env = "SIMPLINEAGE_CONFIG_DIR"
+    )]
     config_dir: PathBuf,
+
+    /// Local SQLite store directory (metadata.sqlite).
+    #[arg(
+        long,
+        short = 'd',
+        global = true,
+        default_value = DEFAULT_DATA_DIR,
+        env = "SIMPLINEAGE_DATA_DIR"
+    )]
+    data_dir: PathBuf,
 
     /// Override log level (trace, debug, info, warn, error).
     #[arg(long, global = true, env = "SIMPLINEAGE_LOGGING__LEVEL")]
     log_level: Option<String>,
 
+    /// Emit machine-readable JSON on stdout where applicable.
+    #[arg(long, global = true, env = "SIMPLINEAGE_JSON")]
+    json: bool,
+
+    /// Reduce decorative output.
+    #[arg(long, short = 'q', global = true)]
+    quiet: bool,
+
+    /// Disable ANSI colors (also honored when `NO_COLOR` is set in the environment).
+    #[arg(long, global = true)]
+    no_color: bool,
+
+    /// Disable progress spinners and bars.
+    #[arg(long, global = true)]
+    no_progress: bool,
+
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Print a short greeting and engine status (Hello World).
-    Hello {
-        /// Optional name to greet.
-        #[arg(short, long, default_value = "world")]
-        name: String,
-    },
-    /// Show version and configuration summary.
-    Version,
-    /// Show engine status.
-    Status,
     /// Import metadata from a file or directory (auto-detect format).
     Import {
         /// File or directory path.
-        path: PathBuf,
+        #[arg(required_unless_present = "list_importers")]
+        path: Option<PathBuf>,
         /// Force a specific importer id (csv, json, parquet, excel, sample-warehouse, …).
         #[arg(long)]
         importer: Option<String>,
@@ -55,174 +106,411 @@ enum Commands {
         /// Snapshot label.
         #[arg(long)]
         label: Option<String>,
+        /// Snapshot source system label.
+        #[arg(long)]
+        source: Option<String>,
         /// List registered importers and exit.
         #[arg(long)]
         list_importers: bool,
-        /// Persist snapshot into a local SQLite store directory (creates metadata.sqlite).
+        /// Persist into the local store (default when --output is omitted).
         #[arg(long)]
-        store: Option<PathBuf>,
-        /// Run a short analysis summary after import (impact/orphans/quality).
+        store: bool,
+        /// Skip local store even when --output is omitted.
+        #[arg(long)]
+        no_store: bool,
+        /// Import mode when writing to the store.
+        #[arg(long, default_value = "replace", value_parser = ["replace", "merge"])]
+        mode: String,
+        /// Print graph statistics after import.
         #[arg(long)]
         analyze: bool,
     },
+
+    /// Build the lineage graph from the store (or a snapshot file / id).
+    Build {
+        /// Snapshot id or JSON file (default: current store head).
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Run the full Phase 4 analysis suite.
+        #[arg(long)]
+        full: bool,
+        /// Write build/analysis report JSON to this path.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+
+    /// Search metadata objects by id, FQN, name, or description.
+    Search {
+        /// Free-text query (substring match).
+        query: String,
+        /// Filter by kind (table, view, column, …).
+        #[arg(long, short = 'k')]
+        kind: Option<String>,
+        /// Maximum results.
+        #[arg(long, short = 'n', default_value_t = 50)]
+        limit: usize,
+        /// Snapshot id or JSON file (default: current).
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+    },
+
+    /// List upstream providers for an object.
+    Upstream {
+        /// Object id or FQN (or unique name fragment).
+        object: String,
+        /// Snapshot id or JSON file.
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Maximum hop depth.
+        #[arg(long)]
+        max_depth: Option<usize>,
+        /// Restrict to tables / views / MVs.
+        #[arg(long)]
+        relations_only: bool,
+    },
+
+    /// List downstream consumers for an object.
+    Downstream {
+        /// Object id or FQN (or unique name fragment).
+        object: String,
+        /// Snapshot id or JSON file.
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Maximum hop depth.
+        #[arg(long)]
+        max_depth: Option<usize>,
+        /// Restrict to tables / views / MVs.
+        #[arg(long)]
+        relations_only: bool,
+    },
+
+    /// Impact analysis (upstream, downstream, or both).
+    Impact {
+        /// Object id or FQN (or unique name fragment).
+        object: String,
+        /// Snapshot id or JSON file.
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Impact direction.
+        #[arg(long, short = 'D', default_value = "both", value_parser = ["upstream", "downstream", "both", "up", "down", "all"])]
+        direction: String,
+        /// Maximum hop depth.
+        #[arg(long)]
+        max_depth: Option<usize>,
+        /// Restrict to tables / views / MVs.
+        #[arg(long)]
+        relations_only: bool,
+    },
+
+    /// Validate dependencies and metadata quality.
+    Validate {
+        /// Snapshot id or JSON file.
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Fail on warnings as well as errors.
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Show store catalog and graph statistics.
+    Stats {
+        /// Snapshot id or JSON file for graph stats (default: current).
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Only list store catalog rows (skip graph stats).
+        #[arg(long)]
+        store_only: bool,
+    },
+
+    /// Compare two snapshots (ids or JSON files).
+    Compare {
+        /// Left snapshot id or file.
+        left: String,
+        /// Right snapshot id or file.
+        right: String,
+        /// Max ids to print per section.
+        #[arg(long, short = 'n', default_value_t = 20)]
+        limit: usize,
+    },
+
+    /// Export a snapshot or analysis report.
+    Export {
+        /// Output path.
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Format: json, json-pretty, objects-csv, edges-csv, graphml, html, analysis.
+        #[arg(short = 'f', long, default_value = "json-pretty")]
+        format: String,
+        /// Snapshot id or JSON file.
+        #[arg(long, short = 's')]
+        snapshot: Option<String>,
+        /// Export full analysis report (same as --format analysis).
+        #[arg(long)]
+        analysis: bool,
+    },
+
+    /// Show version information.
+    Version {
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = VersionFormat::Text)]
+        format: VersionFormat,
+    },
+
+    /// Show engine / environment status.
+    Status,
+
+    /// Print a short greeting (compatibility / smoke test).
+    Hello {
+        /// Optional name to greet.
+        #[arg(short, long, default_value = "world")]
+        name: String,
+    },
 }
 
-fn main() -> anyhow::Result<()> {
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum VersionFormat {
+    Text,
+    Json,
+}
+
+fn clap_styles() -> clap::builder::Styles {
+    use clap::builder::styling::{AnsiColor, Effects, Styles};
+    Styles::styled()
+        .header(AnsiColor::Cyan.on_default() | Effects::BOLD)
+        .usage(AnsiColor::Cyan.on_default() | Effects::BOLD)
+        .literal(AnsiColor::Green.on_default() | Effects::BOLD)
+        .placeholder(AnsiColor::BrightBlue.on_default())
+        .error(AnsiColor::Red.on_default() | Effects::BOLD)
+        .valid(AnsiColor::Green.on_default() | Effects::BOLD)
+        .invalid(AnsiColor::Yellow.on_default() | Effects::BOLD)
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            // Validation failures already printed a styled line.
+            let msg = format!("{err:#}");
+            if !msg.contains("validation failed") {
+                output::error_line(&msg);
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let mut settings = Settings::load_from(&cli.config_dir).unwrap_or_else(|_| Settings::default());
+    let style = OutputStyle {
+        json: cli.json,
+        quiet: cli.quiet,
+        no_color: cli.no_color || std::env::var_os("NO_COLOR").is_some(),
+    };
+    style.apply_global();
 
+    let mut settings = Settings::load_from(&cli.config_dir).unwrap_or_else(|_| Settings::default());
     if let Some(level) = &cli.log_level {
         settings.logging.level = level.clone();
+    } else if style.quiet || style.json {
+        // Keep CLI stdout clean for piping.
+        if settings.logging.level == "info" {
+            settings.logging.level = "warn".into();
+        }
     }
-
     init_tracing(&settings.logging).context("initialize logging")?;
 
-    let mut engine = Engine::new(settings);
+    let ctx = AppContext {
+        data_dir: cli.data_dir.clone(),
+        style,
+    };
 
-    match cli.command.unwrap_or(Commands::Hello {
-        name: "world".into(),
-    }) {
-        Commands::Hello { name } => {
-            println!("Hello, {name}! Welcome to {PRODUCT_NAME} v{VERSION}.");
-            tracing::info!(%name, "hello command");
-            println!("{}", engine.status());
-        }
-        Commands::Version => {
-            println!("{PRODUCT_NAME} {VERSION}");
-        }
-        Commands::Status => {
-            println!("{}", engine.status());
-        }
+    let no_progress = cli.no_progress;
+
+    match cli.command {
         Commands::Import {
             path,
             importer,
             output,
             label,
+            source,
             list_importers,
             store,
+            no_store,
+            mode,
             analyze,
         } => {
-            let mut registry = ImporterRegistry::with_builtins();
-            simplineage_importer_sample::register(&mut registry);
-
-            if list_importers {
-                println!("Registered importers:");
-                for id in registry.ids() {
-                    if let Some(imp) = registry.get(id) {
-                        println!("  - {id}: {} — {}", imp.name(), imp.description());
-                    }
-                }
-                return Ok(());
-            }
-
-            let opts = ImportOptions {
-                label,
-                ..Default::default()
-            };
-
-            let snapshot = if let Some(id) = importer {
-                registry
-                    .import_with(&id, &path, &opts)
-                    .with_context(|| format!("import with importer '{id}'"))?
-            } else if path.is_dir() {
-                registry
-                    .import_dir(&path, &opts)
-                    .with_context(|| format!("import directory {}", path.display()))?
+            let store_flag = if no_store {
+                false
             } else {
-                registry
-                    .import_path(&path, &opts)
-                    .with_context(|| format!("import {}", path.display()))?
+                store || output.is_none()
             };
-
-            println!(
-                "Imported snapshot {} ({} objects, model {})",
-                snapshot.id,
-                snapshot.object_count(),
-                snapshot.model_version
-            );
-            println!(
-                "  tables={} views={} mvs={} columns={} relationships={} dependencies={}",
-                snapshot.tables.len(),
-                snapshot.views.len(),
-                snapshot.materialized_views.len(),
-                snapshot.columns.len(),
-                snapshot.relationships.len(),
-                snapshot.dependencies.len()
-            );
-
-            if let Some(out) = output {
-                let json = snapshot.to_json_pretty()?;
-                std::fs::write(&out, json).with_context(|| format!("write {}", out.display()))?;
-                println!("Wrote {}", out.display());
-            }
-
-            if let Some(store_dir) = store {
-                let meta = MetadataStore::open(&store_dir)
-                    .with_context(|| format!("open store {}", store_dir.display()))?;
-                let result = meta
-                    .import(snapshot.clone(), ImportMode::Replace, Some("cli-import"))
-                    .context("persist snapshot")?;
-                println!(
-                    "Stored snapshot {} in {} (import {}, objects+{}, edges+{})",
-                    result.snapshot_id,
-                    store_dir.join("metadata.sqlite").display(),
-                    result.import_id,
-                    result.objects_added,
-                    result.edges_added
-                );
-                // Prove fast edge load
-                let edges = meta.load_dependencies(&result.snapshot_id)?;
-                println!(
-                    "  Fast edge reload: {} dependency edges from SQLite index",
-                    edges.len()
-                );
-            }
-
-            if analyze {
-                let analysis = AnalysisEngine::from_snapshot(snapshot.clone());
-                let full = analysis.analyze_all();
-                println!("Analysis summary:");
-                println!(
-                    "  graph: nodes={} edges={} cycles={}",
-                    full.statistics.node_count,
-                    full.statistics.edge_count,
-                    full.circular.len()
-                );
-                println!(
-                    "  orphans={} unused={} quality_score={:.0}",
-                    full.orphans.len(),
-                    full.unused.len(),
-                    full.quality.score
-                );
-                if let Some(crit) = full.critical.first() {
-                    println!(
-                        "  top critical: {} (downstream={})",
-                        crit.id, crit.downstream_count
-                    );
+            commands::run_import(
+                &ctx,
+                ImportArgs {
+                    path,
+                    importer,
+                    output,
+                    label,
+                    source,
+                    list_importers,
+                    store: store_flag,
+                    mode,
+                    analyze,
+                    no_progress,
+                },
+            )
+        }
+        Commands::Build {
+            snapshot,
+            full,
+            output,
+        } => commands::run_build(
+            &ctx,
+            BuildArgs {
+                snapshot,
+                full,
+                output,
+                no_progress,
+            },
+        ),
+        Commands::Search {
+            query,
+            kind,
+            limit,
+            snapshot,
+        } => commands::run_search(
+            &ctx,
+            SearchArgs {
+                query,
+                kind,
+                limit,
+                snapshot,
+            },
+        ),
+        Commands::Upstream {
+            object,
+            snapshot,
+            max_depth,
+            relations_only,
+        } => commands::run_upstream(
+            &ctx,
+            LineageArgs {
+                object,
+                snapshot,
+                max_depth,
+                relations_only,
+                no_progress,
+            },
+        ),
+        Commands::Downstream {
+            object,
+            snapshot,
+            max_depth,
+            relations_only,
+        } => commands::run_downstream(
+            &ctx,
+            LineageArgs {
+                object,
+                snapshot,
+                max_depth,
+                relations_only,
+                no_progress,
+            },
+        ),
+        Commands::Impact {
+            object,
+            snapshot,
+            direction,
+            max_depth,
+            relations_only,
+        } => commands::run_impact(
+            &ctx,
+            ImpactArgs {
+                object,
+                snapshot,
+                direction,
+                max_depth,
+                relations_only,
+                no_progress,
+            },
+        ),
+        Commands::Validate { snapshot, strict } => commands::run_validate(
+            &ctx,
+            ValidateArgs {
+                snapshot,
+                strict,
+                no_progress,
+            },
+        ),
+        Commands::Stats {
+            snapshot,
+            store_only,
+        } => commands::run_stats(
+            &ctx,
+            StatsArgs {
+                snapshot,
+                store_only,
+            },
+        ),
+        Commands::Compare { left, right, limit } => {
+            commands::run_compare(&ctx, CompareArgs { left, right, limit })
+        }
+        Commands::Export {
+            output,
+            format,
+            snapshot,
+            analysis,
+        } => commands::run_export(
+            &ctx,
+            ExportArgs {
+                format,
+                output,
+                snapshot,
+                analysis,
+                no_progress,
+            },
+        ),
+        Commands::Version { format } => {
+            match format {
+                VersionFormat::Text => {
+                    println!("{PRODUCT_NAME} {VERSION}");
                 }
-                // Sample impact on first table if any
-                if let Some(t) = snapshot.tables.first() {
-                    let imp = analysis.impact(
-                        &t.meta.id,
-                        &ImpactOptions {
-                            direction: ImpactDirection::Downstream,
-                            ..Default::default()
-                        },
-                    )?;
-                    println!(
-                        "  impact downstream of {}: {} objects",
-                        t.meta.fqn, imp.total_affected
-                    );
+                VersionFormat::Json => {
+                    output::print_json(&serde_json::json!({
+                        "name": PRODUCT_NAME,
+                        "version": VERSION,
+                    }))?;
                 }
             }
-
-            engine
-                .load_snapshot(snapshot)
-                .context("load snapshot into engine")?;
-            println!("{}", engine.status());
+            Ok(())
+        }
+        Commands::Status => {
+            let engine = simplineage_core::Engine::new(settings);
+            if style.json {
+                output::print_json(&serde_json::json!({
+                    "product": PRODUCT_NAME,
+                    "version": VERSION,
+                    "status": engine.status(),
+                    "data_dir": ctx.data_dir.display().to_string(),
+                }))?;
+            } else {
+                println!("{}", engine.status());
+                output::kv(style, "data_dir", ctx.data_dir.display());
+            }
+            Ok(())
+        }
+        Commands::Hello { name } => {
+            if !style.json {
+                println!("Hello, {name}! Welcome to {PRODUCT_NAME} v{VERSION}.");
+            } else {
+                output::print_json(&serde_json::json!({
+                    "hello": name,
+                    "product": PRODUCT_NAME,
+                    "version": VERSION,
+                }))?;
+            }
+            Ok(())
         }
     }
-
-    Ok(())
 }

@@ -7,20 +7,20 @@ It is mandatory for humans, bots, and future automation.
 ## Principles
 
 1. **Never push directly to `main`.** All changes land via pull request.
-2. **Feature branch → Pull Request → CI → Senior maintainer review → Merge.**
+2. **Feature branch → Pull Request → CI → automated senior review → human final approval → Merge.**
 3. **CI Success is authoritative** for automated quality (see Phase 0.2).
-4. **A senior maintainer reviews every PR** for architecture, maintainability,
+4. **An automated senior maintainer bot reviews every PR** for architecture, maintainability,
    correctness, API design, documentation, performance, edge cases, and testing.
 5. **Review is a cycle**, not a one-shot: address feedback, re-run CI, re-review
-   until approved.
-6. **Squash-merge** into `main`; delete the feature branch after merge.
+   until the automated bar is clean.
+6. **A human maintainer** performs **final approval** and **squash-merges** into `main`
+   (the bot does **not** merge automatically). Delete the feature branch after merge.
 
 ```text
-┌─────────────┐     ┌──────────┐     ┌─────────────┐     ┌────────────────┐     ┌─────────┐
-│ Feature     │────▶│ Open PR  │────▶│ CI Success  │────▶│ Senior         │────▶│ Squash  │
-│ branch      │     │ (+ body) │     │ (required)  │     │ maintainer     │     │ merge   │
-└─────────────┘     └──────────┘     └─────────────┘     │ review cycle   │     └─────────┘
-                                                         └────────────────┘
+┌──────────┐   ┌────────┐   ┌────────────┐   ┌─────────────────┐   ┌────────────────┐   ┌────────────┐
+│ Feature  │──▶│ Open   │──▶│ CI Success │──▶│ Automated       │──▶│ Human final    │──▶│ Squash     │
+│ branch   │   │ PR     │   │ (required) │   │ senior review   │   │ approval (you) │   │ merge      │
+└──────────┘   └────────┘   └────────────┘   └─────────────────┘   └────────────────┘   └────────────┘
 ```
 
 ## Roles
@@ -29,13 +29,14 @@ It is mandatory for humans, bots, and future automation.
 |------|----------------|
 | **Author** | Implements on a feature branch; writes a complete PR description; responds to review |
 | **CI** | Runs fmt, Clippy, tests, docs, deny, audit, coverage, Docker on every PR |
-| **Senior maintainer** | Reviews quality bar; requests changes or approves; merges when safe |
+| **Automated senior review** | Bot quality bar + comments; does **not** merge |
+| **Human maintainer** | Final approval and squash-merge |
 | **Code owners** | Listed in `.github/CODEOWNERS` for critical paths |
 
 The repository ships an **automated senior-maintainer bot**
 (`.github/workflows/maintainer.yml` + `.github/scripts/maintainer-review.mjs`)
-that encodes this bar and may squash-merge when CI is green and the review is clean.
-Human maintainers may always override, re-request changes, or merge manually under the same rules.
+that encodes this bar and posts review comments when CI is green.
+**Final approval and squash-merge are always performed by a human maintainer.**
 
 ## Branch rules
 
@@ -104,8 +105,8 @@ Every PR is reviewed for:
 | Outcome | Meaning |
 |---------|---------|
 | **Request changes** | Blockers listed in detail. Author must fix on the **feature branch**. |
-| **Approve** | Static review clean; merge still waits for **CI Success**. |
-| **Merge** | Squash into `main` when review is approved **and** CI Success is green. |
+| **Looks good (automated)** | Static review clean; still needs **human** final approval. |
+| **Human merge** | Maintainer squash-merges when satisfied (**CI Success** + clean review). |
 
 ### Review cycle (repeat until done)
 
@@ -113,7 +114,7 @@ Every PR is reviewed for:
 2. Author addresses **all** feedback on the feature branch (not `main`).
 3. Push triggers the **complete CI pipeline** again.
 4. Maintainer re-reviews.
-5. When approved + CI green → squash-merge and delete branch.
+5. When automated review is clean + CI green → **human** squash-merges and deletes branch.
 
 Do not open a second PR to “fix review” unless the original was closed; push to the same branch.
 

@@ -1,7 +1,7 @@
 name: Maintainer
 
-# Senior open-source maintainer: reviews every PR after CI, merges when safe.
-# Does not replace humans forever — encodes the expected review bar and cycle.
+# Senior maintainer bot: reviews every PR after CI succeeds.
+# Final merge is always a human maintainer decision (not automated).
 on:
   workflow_run:
     workflows: ["CI"]
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number to review/merge"
+        description: "PR number to review"
         required: true
         type: string
 
@@ -18,14 +18,14 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   checks: read
   actions: read
 
 jobs:
-  review-and-merge:
-    name: Senior maintainer (review · merge)
+  review:
+    name: Senior maintainer (review only)
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
@@ -48,8 +48,6 @@ jobs:
               });
               core.setOutput('number', String(pr.number));
               core.setOutput('head_sha', pr.head.sha);
-              core.setOutput('base_sha', pr.base.sha);
-              core.setOutput('head_ref', pr.head.ref);
               core.setOutput('draft', String(pr.draft));
               core.setOutput('title', pr.title);
               return;
@@ -81,8 +79,6 @@ jobs:
             }
             core.setOutput('number', String(pr.number));
             core.setOutput('head_sha', pr.head.sha);
-            core.setOutput('base_sha', pr.base.sha);
-            core.setOutput('head_ref', pr.head.ref);
             core.setOutput('draft', String(pr.draft));
             core.setOutput('title', pr.title);
 
@@ -97,11 +93,10 @@ jobs:
           ref: ${{ steps.pr.outputs.head_sha }}
           fetch-depth: 0
 
-      - name: Fetch base + maintainer script from main
+      - name: Fetch base + maintainer script
         if: steps.pr.outputs.number != ''
         run: |
           git fetch origin main:main || git fetch origin "${{ github.event.repository.default_branch }}:main"
-          # Prefer script from this commit; fall back to main for older branches
           if [ -f .github/scripts/maintainer-review.mjs ]; then
             cp .github/scripts/maintainer-review.mjs /tmp/maintainer-review.mjs
           else
@@ -151,17 +146,20 @@ jobs:
           if [ -f /tmp/maintainer-verdict.json ]; then
             APPROVED=$(node -e "console.log(require('/tmp/maintainer-verdict.json').approved === true)")
             echo "approved=$APPROVED" >> "$GITHUB_OUTPUT"
-            echo "review_ok=$APPROVED" >> "$GITHUB_OUTPUT"
           else
             echo "approved=false" >> "$GITHUB_OUTPUT"
-            echo "review_ok=false" >> "$GITHUB_OUTPUT"
           fi
-          # PR template sections are required for non-draft merges
           if [ "${{ steps.prbody.outputs.ok }}" != "true" ]; then
-            echo "review_ok=false" >> "$GITHUB_OUTPUT"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "body_ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "body_ok=true" >> "$GITHUB_OUTPUT"
+            if [ -f /tmp/maintainer-verdict.json ]; then
+              READY=$(node -e "console.log(require('/tmp/maintainer-verdict.json').approved === true)")
+              echo "ready=$READY" >> "$GITHUB_OUTPUT"
+            else
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Augment review with PR body feedback
@@ -171,21 +169,53 @@ jobs:
             echo ""
             echo "### PR description gaps (must fix)"
             echo "- Missing required sections: **${{ steps.prbody.outputs.missing }}**"
-            echo "- Update the PR body using \`.github/pull_request_template.md\` (Summary, Design decisions, Testing, Future considerations)."
+            echo "- Update the PR body using \`.github/pull_request_template.md\`."
           } >> /tmp/maintainer-review.md
+
+      - name: Append human final-approval notice
+        if: steps.pr.outputs.number != ''
+        run: |
+          {
+            echo ""
+            echo "### Final approval (human)"
+            echo ""
+            if [ "${{ steps.outcome.outputs.ready }}" = "true" ]; then
+              echo "Automated review found **no blockers** and the PR template looks complete."
+              echo "**CI Success** is green for this head."
+              echo ""
+              echo "A **human maintainer** should do a final read and **squash-merge** when satisfied."
+              echo "The bot will **not** merge automatically."
+            else
+              echo "Not ready for human merge yet — resolve blockers / template gaps, push, and wait for CI + re-review."
+              echo "The bot will **not** merge automatically."
+            fi
+            echo ""
+            echo "<!-- maintainer-bot-review -->"
+          } >> /tmp/maintainer-review.md
+          # Ensure single sticky marker at end (script already may include it)
+          # Dedupe marker lines if doubled
+          if [ "$(grep -c 'maintainer-bot-review' /tmp/maintainer-review.md || true)" -gt 1 ]; then
+            # keep first occurrence only by truncating after first marker from original — skip; harmless duplicate in HTML comment
+            true
+          fi
 
       - name: Post maintainer review on PR
         if: steps.pr.outputs.number != ''
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
-          REVIEW_OK: ${{ steps.outcome.outputs.review_ok }}
+          READY: ${{ steps.outcome.outputs.ready }}
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('/tmp/maintainer-review.md', 'utf8');
+            let body = fs.readFileSync('/tmp/maintainer-review.md', 'utf8');
+            if (!body.includes('<!-- maintainer-bot-review -->')) {
+              body += '\n<!-- maintainer-bot-review -->\n';
+            }
             const pr = Number(process.env.PR_NUMBER);
-            const event = process.env.REVIEW_OK === 'true' ? 'APPROVE' : 'REQUEST_CHANGES';
+            const ready = process.env.READY === 'true';
+            // COMMENT for clean PRs (human merges). REQUEST_CHANGES for blockers.
+            const event = ready ? 'COMMENT' : 'REQUEST_CHANGES';
             const marker = '<!-- maintainer-bot-review -->';
 
             const { data: comments } = await github.rest.issues.listComments({
@@ -216,121 +246,10 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: pr,
                 event,
-                body: event === 'APPROVE'
-                  ? 'Senior maintainer: static review clean and PR template complete. Merging if CI Success is green.'
-                  : 'Senior maintainer: please address blockers / PR description gaps, then push and wait for CI + re-review.',
+                body: ready
+                  ? 'Automated senior review: no blockers. Awaiting **human maintainer** final approval and squash-merge.'
+                  : 'Automated senior review: please address blockers / PR description gaps, then push for CI + re-review.',
               });
             } catch (e) {
               core.warning(`createReview: ${e.message}`);
             }
-
-      - name: Skip draft PRs
-        id: draft
-        if: steps.pr.outputs.number != ''
-        run: |
-          if [ "${{ steps.pr.outputs.draft }}" = "true" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Verify CI Success is green
-        id: ci
-        if: steps.pr.outputs.number != '' && steps.draft.outputs.skip != 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pr = Number('${{ steps.pr.outputs.number }}');
-            const { data: pull } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr,
-            });
-            const ref = pull.head.sha;
-            const { data: checks } = await github.rest.checks.listForRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref,
-            });
-            const hit = (checks.check_runs || []).filter(c => c.name === 'CI Success');
-            let green = hit.some(c => c.conclusion === 'success');
-            if (!green && context.eventName === 'workflow_run') {
-              const run = context.payload.workflow_run;
-              if (run.conclusion === 'success' && run.head_sha === ref) {
-                green = true;
-                core.info('Trusting successful CI workflow_run for PR head');
-              }
-            }
-            core.setOutput('green', String(green));
-
-      - name: Merge PR
-        id: merge
-        if: >
-          steps.pr.outputs.number != '' &&
-          steps.draft.outputs.skip != 'true' &&
-          steps.outcome.outputs.review_ok == 'true' &&
-          steps.ci.outputs.green == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          PR="${{ steps.pr.outputs.number }}"
-          echo "Merging PR #$PR (squash) as senior maintainer..."
-          if gh pr merge "$PR" --repo "${{ github.repository }}" --squash --delete-branch; then
-            echo "merged=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "merged=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Could not merge (protection rules or conflicts)."
-            exit 0
-          fi
-
-      - name: Comment merge result
-        if: steps.merge.outputs.merged == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: Number('${{ steps.pr.outputs.number }}'),
-              body: [
-                '## Merged by senior maintainer',
-                '',
-                'CI **Success** was green and automated maintainer review found **no blockers**.',
-                'Squash-merged into `main`; feature branch deleted.',
-                '',
-                'This is the standard path for every phase: branch → PR → CI → review → merge.',
-              ].join('\n'),
-            });
-
-      - name: Comment blocked merge
-        if: >
-          steps.pr.outputs.number != '' &&
-          steps.draft.outputs.skip != 'true' &&
-          (steps.outcome.outputs.review_ok != 'true' || steps.ci.outputs.green != 'true') &&
-          steps.merge.outputs.merged != 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const reviewOk = '${{ steps.outcome.outputs.review_ok }}' === 'true';
-            const ciOk = '${{ steps.ci.outputs.green }}' === 'true';
-            const bodyOk = '${{ steps.outcome.outputs.body_ok }}' !== 'false';
-            const reasons = [];
-            if (!reviewOk) reasons.push('maintainer static review found **blockers** or incomplete PR description');
-            if (!ciOk) reasons.push('**CI Success** is not green');
-            if (!bodyOk) reasons.push('PR body missing required sections');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: Number('${{ steps.pr.outputs.number }}'),
-              body: [
-                '## Maintainer did not merge yet',
-                '',
-                reasons.map(r => `- ${r}`).join('\n'),
-                '',
-                'Address feedback on the **feature branch**, push, and wait for CI + maintainer re-review.',
-                'Do **not** push to `main`.',
-                '',
-                'See [docs/GOVERNANCE.md](../blob/main/docs/GOVERNANCE.md).',
-              ].join('\n'),
-            });

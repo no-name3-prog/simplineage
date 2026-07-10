@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Maintainer bot reviews PRs only; **human final approval** is required to merge (no automated squash-merge)
+
 ### Added
 
 - Phase 1 core metadata model: vendor-agnostic Catalog, Database, Schema, Table, View, MaterializedView, Column, Relationship, Dependency, Snapshot with JSON serialization, validation, and model versioning

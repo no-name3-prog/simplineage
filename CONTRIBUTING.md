@@ -20,11 +20,12 @@ Short version:
    - Testing  
    - Future considerations  
 3. Wait for **CI Success** (authoritative automated gate).
-4. A **senior maintainer** reviews architecture, maintainability, correctness,
+4. An **automated senior review** checks architecture, maintainability, correctness,
    API design, docs, performance, edge cases, and testing.
 5. Address **all** feedback on the feature branch; CI re-runs; review repeats
-   until approved.
-6. **Squash-merge** to `main`; delete the feature branch.
+   until the automated bar is clean.
+6. A **human maintainer** gives final approval and **squash-merges** to `main`
+   (the bot does not merge). Delete the feature branch after merge.
 
 ```bash
 git checkout main && git pull

@@ -1,0 +1,6 @@
+entity_type,from_schema,from_table,to_schema,to_table,kind
+dependency,raw,orders,staging,stg_orders,view_definition
+dependency,raw,customers,staging,stg_customers,view_definition
+dependency,staging,stg_orders,marts,fct_orders,pipeline
+dependency,staging,stg_customers,marts,dim_customers,pipeline
+dependency,marts,fct_orders,marts,orders_daily,view_definition

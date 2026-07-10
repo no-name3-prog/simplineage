@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use simplineage_analysis::{AnalysisEngine, ImpactDirection, ImpactOptions};
 use simplineage_core::{Engine, PRODUCT_NAME, Settings, VERSION, init_tracing};
 use simplineage_importers::{ImportOptions, ImporterRegistry};
+use simplineage_storage::{ImportMode, MetadataStore};
 
 /// SimpLineage — offline-first metadata lineage for data engineers.
 #[derive(Debug, Parser)]
@@ -56,6 +58,12 @@ enum Commands {
         /// List registered importers and exit.
         #[arg(long)]
         list_importers: bool,
+        /// Persist snapshot into a local SQLite store directory (creates metadata.sqlite).
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Run a short analysis summary after import (impact/orphans/quality).
+        #[arg(long)]
+        analyze: bool,
     },
 }
 
@@ -92,6 +100,8 @@ fn main() -> anyhow::Result<()> {
             output,
             label,
             list_importers,
+            store,
+            analyze,
         } => {
             let mut registry = ImporterRegistry::with_builtins();
             simplineage_importer_sample::register(&mut registry);
@@ -145,6 +155,66 @@ fn main() -> anyhow::Result<()> {
                 let json = snapshot.to_json_pretty()?;
                 std::fs::write(&out, json).with_context(|| format!("write {}", out.display()))?;
                 println!("Wrote {}", out.display());
+            }
+
+            if let Some(store_dir) = store {
+                let meta = MetadataStore::open(&store_dir)
+                    .with_context(|| format!("open store {}", store_dir.display()))?;
+                let result = meta
+                    .import(snapshot.clone(), ImportMode::Replace, Some("cli-import"))
+                    .context("persist snapshot")?;
+                println!(
+                    "Stored snapshot {} in {} (import {}, objects+{}, edges+{})",
+                    result.snapshot_id,
+                    store_dir.join("metadata.sqlite").display(),
+                    result.import_id,
+                    result.objects_added,
+                    result.edges_added
+                );
+                // Prove fast edge load
+                let edges = meta.load_dependencies(&result.snapshot_id)?;
+                println!(
+                    "  Fast edge reload: {} dependency edges from SQLite index",
+                    edges.len()
+                );
+            }
+
+            if analyze {
+                let analysis = AnalysisEngine::from_snapshot(snapshot.clone());
+                let full = analysis.analyze_all();
+                println!("Analysis summary:");
+                println!(
+                    "  graph: nodes={} edges={} cycles={}",
+                    full.statistics.node_count,
+                    full.statistics.edge_count,
+                    full.circular.len()
+                );
+                println!(
+                    "  orphans={} unused={} quality_score={:.0}",
+                    full.orphans.len(),
+                    full.unused.len(),
+                    full.quality.score
+                );
+                if let Some(crit) = full.critical.first() {
+                    println!(
+                        "  top critical: {} (downstream={})",
+                        crit.id, crit.downstream_count
+                    );
+                }
+                // Sample impact on first table if any
+                if let Some(t) = snapshot.tables.first() {
+                    let imp = analysis.impact(
+                        &t.meta.id,
+                        &ImpactOptions {
+                            direction: ImpactDirection::Downstream,
+                            ..Default::default()
+                        },
+                    )?;
+                    println!(
+                        "  impact downstream of {}: {} objects",
+                        t.meta.fqn, imp.total_affected
+                    );
+                }
             }
 
             engine

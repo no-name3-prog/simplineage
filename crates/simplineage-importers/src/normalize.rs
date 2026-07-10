@@ -147,6 +147,34 @@ pub fn intermediate_to_snapshot(
         });
     }
 
+    // Ensure tables exist for dependency endpoints (lineage-only CSV files).
+    for d in &cat.dependencies {
+        let from_schema = d.from_schema.as_deref().unwrap_or(default_schema.as_str());
+        let to_schema = d.to_schema.as_deref().unwrap_or(default_schema.as_str());
+        ensure_stub_table(
+            &mut snap,
+            &mut catalogs,
+            &mut databases,
+            &mut schemas,
+            &mut relations,
+            None,
+            None,
+            from_schema,
+            &d.from_table,
+        )?;
+        ensure_stub_table(
+            &mut snap,
+            &mut catalogs,
+            &mut databases,
+            &mut schemas,
+            &mut relations,
+            None,
+            None,
+            to_schema,
+            &d.to_table,
+        )?;
+    }
+
     for d in &cat.dependencies {
         let from_schema = d.from_schema.as_deref().unwrap_or(default_schema.as_str());
         let to_schema = d.to_schema.as_deref().unwrap_or(default_schema.as_str());
@@ -250,6 +278,41 @@ fn add_table(
     }
     relations.insert(rel_key, (id, kind.to_string()));
     Ok(())
+}
+
+fn ensure_stub_table(
+    snap: &mut Snapshot,
+    catalogs: &mut BTreeMap<String, ObjectId>,
+    databases: &mut BTreeMap<String, ObjectId>,
+    schemas: &mut BTreeMap<String, ObjectId>,
+    relations: &mut BTreeMap<String, (ObjectId, String)>,
+    catalog: Option<&str>,
+    database: Option<&str>,
+    schema_name: &str,
+    name: &str,
+) -> Result<()> {
+    let rel_key = relation_key(catalog, database, schema_name, name);
+    if relations.contains_key(&rel_key) {
+        return Ok(());
+    }
+    // Already present under a longer key (e.g. catalog.schema.table).
+    if find_relation(relations, schema_name, name).is_some() {
+        return Ok(());
+    }
+    add_table(
+        snap,
+        catalogs,
+        databases,
+        schemas,
+        relations,
+        catalog,
+        database,
+        schema_name,
+        name,
+        Some("table"),
+        None,
+        None,
+    )
 }
 
 fn ensure_parent_table(
@@ -562,8 +625,8 @@ pub fn parse_data_type(raw: Option<&str>) -> DataType {
     match base {
         "bool" | "boolean" | "bit" => DataType::Boolean,
         "int" | "integer" | "int4" | "int32" | "smallint" | "int2" | "bigint" | "int8"
-        | "tinyint" => {
-            let bits = if base == "bigint" || base == "int8" {
+        | "tinyint" | "int64" => {
+            let bits = if base == "bigint" || base == "int8" || base == "int64" {
                 Some(64)
             } else if base == "smallint" || base == "int2" || base == "tinyint" {
                 Some(16)
@@ -572,12 +635,12 @@ pub fn parse_data_type(raw: Option<&str>) -> DataType {
             };
             DataType::Integer { bits }
         }
-        "decimal" | "numeric" | "number" => DataType::Decimal {
+        "decimal" | "numeric" | "number" | "bignumeric" => DataType::Decimal {
             precision: None,
             scale: None,
         },
-        "float" | "float4" | "float8" | "double" | "real" => DataType::Float {
-            bits: if base.contains('8') || base == "double" {
+        "float" | "float4" | "float8" | "double" | "real" | "float64" => DataType::Float {
+            bits: if base.contains('8') || base == "double" || base == "float64" {
                 Some(64)
             } else {
                 Some(32)

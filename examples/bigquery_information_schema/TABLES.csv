@@ -1,0 +1,8 @@
+table_catalog,table_schema,table_name,table_type,creation_time,ddl
+acme-analytics,raw,orders,BASE TABLE,2024-01-15 10:00:00+00,CREATE TABLE raw.orders (order_id INT64, customer_id INT64, amount NUMERIC, order_ts TIMESTAMP)
+acme-analytics,raw,customers,BASE TABLE,2024-01-15 10:00:00+00,CREATE TABLE raw.customers (customer_id INT64, email STRING, country STRING)
+acme-analytics,staging,stg_orders,VIEW,2024-02-01 09:00:00+00,CREATE VIEW staging.stg_orders AS SELECT * FROM raw.orders WHERE amount > 0
+acme-analytics,staging,stg_customers,VIEW,2024-02-01 09:00:00+00,CREATE VIEW staging.stg_customers AS SELECT customer_id, email, country FROM raw.customers
+acme-analytics,marts,fct_orders,BASE TABLE,2024-03-01 12:00:00+00,CREATE TABLE marts.fct_orders AS SELECT * FROM staging.stg_orders
+acme-analytics,marts,dim_customers,BASE TABLE,2024-03-01 12:00:00+00,CREATE TABLE marts.dim_customers AS SELECT * FROM staging.stg_customers
+acme-analytics,marts,orders_daily,MATERIALIZED VIEW,2024-03-10 08:00:00+00,CREATE MATERIALIZED VIEW marts.orders_daily AS SELECT DATE(order_ts) d, COUNT(*) c FROM marts.fct_orders GROUP BY 1

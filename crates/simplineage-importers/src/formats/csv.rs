@@ -130,10 +130,24 @@ fn parse_csv_file(path: &Path) -> Result<IntermediateCatalog> {
             .map(|s| s.to_ascii_lowercase())
             .unwrap_or_default();
 
+        // BigQuery INFORMATION_SCHEMA.TABLES / COLUMNS exports
+        let bq_tables = headers.iter().any(|h| h == "table_name")
+            && headers
+                .iter()
+                .any(|h| h == "table_type" || h == "table_schema")
+            && !headers.iter().any(|h| h == "column_name");
+        let bq_columns =
+            headers.iter().any(|h| h == "column_name") && headers.iter().any(|h| h == "table_name");
         let force_table = entity.is_empty()
-            && (stem.contains("table") || headers.iter().any(|h| h == "kind" || h == "table_name"));
+            && !bq_columns
+            && (stem.contains("table")
+                || bq_tables
+                || headers.iter().any(|h| h == "kind")
+                || (headers.iter().any(|h| h == "table_name")
+                    && !headers.iter().any(|h| h == "column_name")));
         let force_column = entity.is_empty()
             && (stem.contains("column")
+                || bq_columns
                 || (headers.iter().any(|h| h == "column" || h == "column_name")
                     && headers.iter().any(|h| h == "table" || h == "table_name")));
 
@@ -147,13 +161,26 @@ fn parse_csv_file(path: &Path) -> Result<IntermediateCatalog> {
                     None
                 }
             });
+            let raw_kind = kind.or_else(|| get(&["table_type"]));
+            let kind = raw_kind.map(|k| match k.to_ascii_uppercase().as_str() {
+                "BASE TABLE" | "TABLE" | "EXTERNAL" | "CLONE" | "SNAPSHOT" => "table".into(),
+                "VIEW" => "view".into(),
+                "MATERIALIZED VIEW" | "MATERIALIZED_VIEW" => "materialized_view".into(),
+                other => other.to_ascii_lowercase(),
+            });
             cat.tables.push(IntermediateTable {
-                catalog: get(&["catalog", "catalog_name"]),
-                database: get(&["database", "db", "database_name"]),
-                schema: get(&["schema", "schema_name", "namespace"]),
+                catalog: get(&["catalog", "catalog_name", "table_catalog", "project_id"]),
+                database: get(&["database", "db", "database_name", "dataset_id"]),
+                schema: get(&[
+                    "schema",
+                    "schema_name",
+                    "namespace",
+                    "table_schema",
+                    "dataset_name",
+                ]),
                 name,
                 kind,
-                definition: get(&["definition", "sql", "view_definition"]),
+                definition: get(&["definition", "sql", "view_definition", "ddl"]),
                 description: get(&["description", "comment"]),
             });
         } else if entity == "column" || force_column {
@@ -162,9 +189,15 @@ fn parse_csv_file(path: &Path) -> Result<IntermediateCatalog> {
             let name = get(&["column", "column_name", "name", "field"])
                 .ok_or_else(|| Error::import("csv column row missing column name"))?;
             cat.columns.push(IntermediateColumn {
-                catalog: get(&["catalog", "catalog_name"]),
-                database: get(&["database", "db", "database_name"]),
-                schema: get(&["schema", "schema_name", "namespace"]),
+                catalog: get(&["catalog", "catalog_name", "table_catalog", "project_id"]),
+                database: get(&["database", "db", "database_name", "dataset_id"]),
+                schema: get(&[
+                    "schema",
+                    "schema_name",
+                    "namespace",
+                    "table_schema",
+                    "dataset_name",
+                ]),
                 table,
                 name,
                 data_type: get(&["data_type", "datatype", "type", "column_type"]),
@@ -209,11 +242,12 @@ fn parse_csv_file(path: &Path) -> Result<IntermediateCatalog> {
                 let name = get(&["column", "column_name", "name"])
                     .ok_or_else(|| Error::import("csv row missing column"))?;
                 cat.columns.push(IntermediateColumn {
-                    schema: get(&["schema", "schema_name"]),
+                    catalog: get(&["table_catalog", "catalog"]),
+                    schema: get(&["schema", "schema_name", "table_schema"]),
                     table,
                     name,
                     data_type: get(&["data_type", "type"]),
-                    nullable: get_bool(&["nullable"]),
+                    nullable: get_bool(&["nullable", "is_nullable"]),
                     ordinal: get_u32(&["ordinal", "ordinal_position"]),
                     is_primary_key: get_bool(&["is_primary_key", "pk"]),
                     ..Default::default()
@@ -229,9 +263,13 @@ fn parse_csv_file(path: &Path) -> Result<IntermediateCatalog> {
         }
     }
 
-    if cat.tables.is_empty() && cat.columns.is_empty() {
+    if cat.tables.is_empty()
+        && cat.columns.is_empty()
+        && cat.relationships.is_empty()
+        && cat.dependencies.is_empty()
+    {
         return Err(Error::import(format!(
-            "no table/column rows recognized in {}",
+            "no table/column/relationship/dependency rows recognized in {}",
             path.display()
         )));
     }

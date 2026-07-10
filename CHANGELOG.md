@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- BigQuery INFORMATION_SCHEMA CSV demo (`examples/bigquery_information_schema`) with table_catalog/table_type/is_nullable mapping, directory merge + FQN reconcile, CLI `--store`/`--analyze`
 - Phase 5 SQLite storage: snapshots, incremental imports, materialized edges, migrations, benchmarks
 - Phase 4 analysis engine: impact, dependency validation, unused/orphan detection, cycles, critical tables, longest chains, quality checks
 - Phase 3 lineage graph engine: upstream/downstream traversal, shortest path, all paths, cycle detection, statistics, Criterion benchmarks

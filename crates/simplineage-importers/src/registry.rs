@@ -181,9 +181,40 @@ impl ImporterRegistry {
         let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|e| Error::import(format!("read_dir {}: {e}", dir.display())))?
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.is_file() && self.detect(p).is_some())
+            .filter(|p| {
+                if !p.is_file() || self.detect(p).is_none() {
+                    return false;
+                }
+                // Skip docs/config files that may weakly match text formats.
+                let ext = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                matches!(
+                    ext.as_str(),
+                    "csv" | "tsv" | "json" | "parquet" | "parq" | "xlsx" | "xlsm" | "xls"
+                )
+            })
             .collect();
-        paths.sort();
+        // Prefer table catalogs, then columns, then lineage/other (BigQuery dumps).
+        paths.sort_by_key(|p| {
+            let name = p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let rank = if name.contains("table") && !name.contains("column") {
+                0
+            } else if name.contains("column") {
+                1
+            } else if name.contains("lineage") || name.contains("depend") {
+                2
+            } else {
+                3
+            };
+            (rank, name)
+        });
         if paths.is_empty() {
             return Err(Error::import(format!(
                 "no supported metadata files in {}",
@@ -203,12 +234,10 @@ impl ImporterRegistry {
         if let Some(label) = &options.label {
             out.label = Some(label.clone());
         }
+        reconcile_relation_aliases(&mut out);
         if !options.skip_validation {
             use simplineage_core::model::Validate;
-            // Merged ids may collide; re-validate best-effort
-            if let Err(e) = out.validate() {
-                tracing::warn!(error = %e, "merged snapshot validation warning");
-            }
+            out.validate()?;
         }
         Ok(out)
     }
@@ -230,19 +259,124 @@ fn normalize_path(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
-/// Naive merge: concatenate collections (does not re-key colliding ids).
+/// Merge snapshots by object/edge id (incoming wins on conflict).
 fn merge_snapshots(mut a: Snapshot, b: Snapshot) -> Snapshot {
-    a.catalogs.extend(b.catalogs);
-    a.databases.extend(b.databases);
-    a.schemas.extend(b.schemas);
-    a.tables.extend(b.tables);
-    a.views.extend(b.views);
-    a.materialized_views.extend(b.materialized_views);
-    a.columns.extend(b.columns);
-    a.relationships.extend(b.relationships);
-    a.dependencies.extend(b.dependencies);
-    if a.source.is_none() {
+    a.catalogs = union_by_id(a.catalogs, b.catalogs, |c| c.meta.id.as_str());
+    a.databases = union_by_id(a.databases, b.databases, |d| d.meta.id.as_str());
+    a.schemas = union_by_id(a.schemas, b.schemas, |s| s.meta.id.as_str());
+    a.tables = union_by_id(a.tables, b.tables, |t| t.meta.id.as_str());
+    a.views = union_by_id(a.views, b.views, |v| v.meta.id.as_str());
+    a.materialized_views = union_by_id(a.materialized_views, b.materialized_views, |m| {
+        m.meta.id.as_str()
+    });
+    a.columns = union_by_id(a.columns, b.columns, |c| c.meta.id.as_str());
+    a.relationships = union_by_id(a.relationships, b.relationships, |r| r.id.as_str());
+    a.dependencies = union_by_id(a.dependencies, b.dependencies, |d| d.id.as_str());
+    if b.source.is_some() {
         a.source = b.source;
     }
+    for (k, v) in b.attributes {
+        a.attributes.insert(k, v);
+    }
     a
+}
+
+fn union_by_id<T, F>(mut base: Vec<T>, incoming: Vec<T>, id_of: F) -> Vec<T>
+where
+    F: Fn(&T) -> &str,
+{
+    use std::collections::HashMap;
+    let mut index: HashMap<String, usize> = base
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (id_of(t).to_string(), i))
+        .collect();
+    for item in incoming {
+        let id = id_of(&item).to_string();
+        if let Some(&i) = index.get(&id) {
+            base[i] = item;
+        } else {
+            index.insert(id, base.len());
+            base.push(item);
+        }
+    }
+    base
+}
+
+/// Collapse short schema.table stubs into catalog.schema.table nodes and rewrite edges.
+/// Drop short schema.table stubs when a longer catalog.schema.table exists; rewrite edges.
+fn reconcile_relation_aliases(snap: &mut Snapshot) {
+    use simplineage_core::ObjectId;
+    use std::collections::HashMap;
+
+    // rank: FQN length primary; prefer view/mv ids over table stubs when equal.
+    let mut prefer: HashMap<String, (usize, ObjectId)> = HashMap::new();
+    let mut register = |id: &ObjectId, parts: &[String], kind_bonus: usize| {
+        if parts.len() < 2 {
+            return;
+        }
+        let short = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+        let rank = parts.len() * 10 + kind_bonus;
+        prefer
+            .entry(short)
+            .and_modify(|(r, oid)| {
+                if rank > *r {
+                    *r = rank;
+                    *oid = id.clone();
+                }
+            })
+            .or_insert((rank, id.clone()));
+    };
+    for t in &snap.tables {
+        register(&t.meta.id, &t.meta.fqn.parts, 0);
+    }
+    for v in &snap.views {
+        register(&v.meta.id, &v.meta.fqn.parts, 2);
+    }
+    for m in &snap.materialized_views {
+        register(&m.meta.id, &m.meta.fqn.parts, 2);
+    }
+
+    let mut rewrite: HashMap<String, ObjectId> = HashMap::new();
+    let mut collect_rewrite = |id: &ObjectId, parts: &[String]| {
+        if parts.len() < 2 {
+            return;
+        }
+        let short = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+        if let Some((_, pref)) = prefer.get(&short) {
+            if pref != id {
+                rewrite.insert(id.as_str().to_string(), pref.clone());
+            }
+        }
+    };
+    for t in &snap.tables {
+        collect_rewrite(&t.meta.id, &t.meta.fqn.parts);
+    }
+    for v in &snap.views {
+        collect_rewrite(&v.meta.id, &v.meta.fqn.parts);
+    }
+    for m in &snap.materialized_views {
+        collect_rewrite(&m.meta.id, &m.meta.fqn.parts);
+    }
+
+    snap.tables
+        .retain(|t| !rewrite.contains_key(t.meta.id.as_str()));
+    snap.views
+        .retain(|v| !rewrite.contains_key(v.meta.id.as_str()));
+    snap.materialized_views
+        .retain(|m| !rewrite.contains_key(m.meta.id.as_str()));
+
+    for dep in &mut snap.dependencies {
+        if let Some(n) = rewrite.get(dep.from_id.as_str()) {
+            dep.from_id = n.clone();
+        }
+        if let Some(n) = rewrite.get(dep.to_id.as_str()) {
+            dep.to_id = n.clone();
+        }
+    }
+    for col in &mut snap.columns {
+        if let Some(n) = rewrite.get(col.parent_id.as_str()) {
+            col.parent_id = n.clone();
+        }
+    }
 }

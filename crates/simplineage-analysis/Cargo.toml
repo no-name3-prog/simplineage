@@ -1,6 +1,6 @@
 [package]
 name = "simplineage-analysis"
-description = "Lineage graph analysis: impact, cycles, paths, statistics"
+description = "Lineage graph and analysis engine: impact, validation, quality, criticality"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

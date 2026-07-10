@@ -5,7 +5,7 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Import framework live (CSV/JSON/Parquet/Excel plugins + sample warehouse crate). Graph analysis still upcoming.
+> **Status:** Import framework + **lineage graph engine** (traversal, paths, cycles, stats). Visualization still upcoming.
 
 [![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -105,6 +105,7 @@ Default: [`config/default.toml`](config/default.toml). Override with
 - [Governance](docs/GOVERNANCE.md) — **PR-only** process for every phase  
 - [Metadata model](docs/metadata-model.md) — vendor-agnostic catalog types  
 - [Importers](docs/importers.md) — plugin import framework  
+- [Graph engine](docs/graph-engine.md) — lineage traversal & stats  
 - [Development](docs/development.md)  
 - [Code of Conduct](CODE_OF_CONDUCT.md)  
 - [Security](SECURITY.md)  

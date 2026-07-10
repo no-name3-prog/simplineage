@@ -47,6 +47,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 clap = { version = "4", features = ["derive", "env"] }
 config = "0.15"
+petgraph = "0.7"
+indexmap = "2"
 csv = "1"
 calamine = "0.36"
 parquet = { version = "54", default-features = false, features = ["arrow", "snap", "zstd"] }

@@ -1,6 +1,6 @@
 [package]
 name = "simplineage-analysis"
-description = "Lineage graph analysis: impact, cycles, orphans, statistics"
+description = "Lineage graph analysis: impact, cycles, paths, statistics"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,3 +15,14 @@ simplineage-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+petgraph.workspace = true
+indexmap.workspace = true
+serde = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_json.workspace = true
+
+[[bench]]
+name = "graph_bench"
+harness = false

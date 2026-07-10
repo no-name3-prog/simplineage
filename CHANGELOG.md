@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 3 lineage graph engine: upstream/downstream traversal, shortest path, all paths, cycle detection, statistics, Criterion benchmarks
 - Plugin-based metadata import framework: auto-detect CSV/JSON/Parquet/Excel, normalize to Snapshot, sample warehouse crate, CLI `import`
 - Phase 1 core metadata model: vendor-agnostic Catalog, Database, Schema, Table, View, MaterializedView, Column, Relationship, Dependency, Snapshot with JSON serialization, validation, and model versioning
 - Phase 0.3 repository governance: mandatory PR workflow, senior maintainer review automation, branch protection helper, and [docs/GOVERNANCE.md](docs/GOVERNANCE.md) as the standard process for every future phase

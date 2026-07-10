@@ -1,0 +1,47 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment & local config
+.env
+.env.*
+!.env.example
+config/local.toml
+*.local.toml
+
+# Logs and coverage
+*.log
+coverage/
+lcov.info
+tarpaulin-report.html
+htmlcov/
+
+# OS
+Thumbs.db
+
+# Node (future web frontend)
+web/node_modules/
+web/dist/
+web/.next/
+web/out/
+
+# Python bindings (future)
+**/.venv/
+**/__pycache__/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Benchmarks / profiling
+flamegraph.svg
+perf.data*

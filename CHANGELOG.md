@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 0.3 repository governance: mandatory PR workflow, senior maintainer review automation, branch protection helper, and [docs/GOVERNANCE.md](docs/GOVERNANCE.md) as the standard process for every future phase
 - Phase 0.2 engineering standards: GitHub Actions CI (rustfmt, Clippy, nextest,
   rustdoc, cargo-deny, cargo-audit, llvm-cov, Docker), Dependabot, release
   workflow, Criterion benches, Docker/devcontainer for optional local full tooling,

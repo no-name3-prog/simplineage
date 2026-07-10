@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 5 SQLite storage: snapshots, incremental imports, materialized edges, migrations, benchmarks
 - Phase 4 analysis engine: impact, dependency validation, unused/orphan detection, cycles, critical tables, longest chains, quality checks
 - Phase 3 lineage graph engine: upstream/downstream traversal, shortest path, all paths, cycle detection, statistics, Criterion benchmarks
 - Plugin-based metadata import framework: auto-detect CSV/JSON/Parquet/Excel, normalize to Snapshot, sample warehouse crate, CLI `import`

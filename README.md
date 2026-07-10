@@ -5,7 +5,7 @@
 SimpLineage ingests exported metadata, builds lineage graphs, runs impact analysis,
 and produces interactive offline reports — without requiring a cloud control plane.
 
-> **Status:** Import + graph + **analysis engine** (impact, validation, quality, critical tables). Visualization still upcoming.
+> **Status:** Core model, import, graph, analysis, and **SQLite storage**. Visualization still upcoming.
 
 [![CI](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml/badge.svg)](https://github.com/no-name3-prog/simplineage/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -107,6 +107,7 @@ Default: [`config/default.toml`](config/default.toml). Override with
 - [Importers](docs/importers.md) — plugin import framework  
 - [Graph engine](docs/graph-engine.md) — lineage traversal & stats  
 - [Analysis engine](docs/analysis-engine.md) — impact, quality, criticality  
+- [Storage](docs/storage.md) — DuckDB persistence  
 - [Development](docs/development.md)  
 - [Code of Conduct](CODE_OF_CONDUCT.md)  
 - [Security](SECURITY.md)  

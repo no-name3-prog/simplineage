@@ -1,41 +1,38 @@
-//! Storage backends for SimpLineage.
+//! Local metadata persistence for SimpLineage using **SQLite**.
 //!
-//! Planned: DuckDB and/or SQLite for offline-first metadata persistence.
+//! Lightweight offline-first storage (no heavy native analytics engines).
+//!
+//! # Features
+//!
+//! - Snapshot storage (full JSON payload + indexes)
+//! - Materialized lineage edges for **fast graph reconstruction**
+//! - **Incremental imports** (`Replace` / `Merge`)
+//! - Schema **migrations**
+//!
+//! # Example
+//!
+//! ```
+//! use simplineage_storage::{MetadataStore, ImportMode};
+//! use simplineage_core::Snapshot;
+//!
+//! let store = MetadataStore::open_in_memory().unwrap();
+//! let snap = Snapshot::new();
+//! let id = snap.id.clone();
+//! store.save_snapshot(&snap, true).unwrap();
+//! let loaded = store.load_current().unwrap().unwrap();
+//! assert_eq!(loaded.id, id);
+//! let _ = ImportMode::Replace;
+//! ```
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
-use std::path::{Path, PathBuf};
+pub mod error;
+pub mod merge;
+pub mod migrations;
+pub mod store;
 
-use simplineage_core::Result;
-
-/// Handle to a local metadata store.
-#[derive(Debug, Clone)]
-pub struct Store {
-    data_dir: PathBuf,
-}
-
-impl Store {
-    /// Open (or create) a store rooted at `data_dir`.
-    pub fn open(data_dir: impl Into<PathBuf>) -> Result<Self> {
-        let data_dir = data_dir.into();
-        tracing::debug!(?data_dir, "opening storage (placeholder)");
-        Ok(Self { data_dir })
-    }
-
-    /// Directory where store files live.
-    pub fn data_dir(&self) -> &Path {
-        &self.data_dir
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn open_store() {
-        let store = Store::open(".simplineage-test").unwrap();
-        assert_eq!(store.data_dir(), Path::new(".simplineage-test"));
-    }
-}
+pub use error::{Result, StorageError};
+pub use merge::{ImportMode, merge_snapshots};
+pub use migrations::SCHEMA_VERSION;
+pub use store::{ImportResult, MetadataStore, SnapshotMeta, Store};

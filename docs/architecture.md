@@ -95,6 +95,7 @@ Structured logging uses [`tracing`](https://docs.rs/tracing) with
 | Import framework (CSV/JSON/Parquet/Excel) | Implemented |
 | Lineage graph engine | Implemented (Phase 3) |
 | Analysis engine | Implemented (Phase 4) |
+| SQLite storage | Implemented (Phase 5) |
 | Hello World CLI | Implemented |
 | Importers / storage / analysis / exporters | Placeholders only |
 | Server / web / language bindings | Placeholders only |
@@ -127,3 +128,7 @@ See [graph-engine.md](graph-engine.md).
 ## Analysis engine
 
 See [analysis-engine.md](analysis-engine.md).
+
+## Storage
+
+See [storage.md](storage.md).

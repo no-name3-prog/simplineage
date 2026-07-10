@@ -1,13 +1,28 @@
-//! Exporters for lineage artifacts (JSON, CSV, GraphML, HTML).
+//! Exporters for lineage artifacts (JSON, CSV, GraphML, HTML, Mermaid).
+//!
+//! # Offline HTML report (Phase 7)
+//!
+//! [`html::write_html_report`] emits a **self-contained** HTML file with an
+//! interactive lineage graph. No backend server or network access is required
+//! to view the report in a browser.
+//!
+//! Features: pan/zoom, search, kind filters, metadata side panel, client-side
+//! impact analysis, dark mode, SVG download, Mermaid download.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
+
+pub mod html;
+pub mod mermaid;
 
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 
 use simplineage_core::{Error, Result, Snapshot};
+
+pub use html::{ReportData, build_report_data, render_html_report, write_html_report};
+pub use mermaid::{MermaidOptions, render_mermaid, write_mermaid};
 
 /// Supported export formats for CLI and library callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,8 +37,10 @@ pub enum ExportFormat {
     EdgesCsv,
     /// GraphML for desktop graph tools.
     GraphMl,
-    /// Minimal offline HTML summary.
+    /// Interactive offline HTML lineage report.
     Html,
+    /// Mermaid flowchart (`.mmd` text).
+    Mermaid,
 }
 
 impl ExportFormat {
@@ -35,7 +52,8 @@ impl ExportFormat {
             "objects-csv" | "objects_csv" | "csv" => Some(Self::ObjectsCsv),
             "edges-csv" | "edges_csv" | "edges" => Some(Self::EdgesCsv),
             "graphml" | "graph-ml" => Some(Self::GraphMl),
-            "html" => Some(Self::Html),
+            "html" | "report" | "lineage-html" => Some(Self::Html),
+            "mermaid" | "mmd" => Some(Self::Mermaid),
             _ => None,
         }
     }
@@ -50,6 +68,7 @@ impl ExportFormat {
             Self::EdgesCsv => "edges-csv",
             Self::GraphMl => "graphml",
             Self::Html => "html",
+            Self::Mermaid => "mermaid",
         }
     }
 
@@ -63,6 +82,7 @@ impl ExportFormat {
             "edges-csv",
             "graphml",
             "html",
+            "mermaid",
         ]
     }
 }
@@ -96,7 +116,8 @@ pub fn export_snapshot(snapshot: &Snapshot, path: &Path, format: ExportFormat) -
         ExportFormat::ObjectsCsv => write_objects_csv(snapshot, path)?,
         ExportFormat::EdgesCsv => write_edges_csv(snapshot, path)?,
         ExportFormat::GraphMl => write_graphml(snapshot, path)?,
-        ExportFormat::Html => write_html_summary(snapshot, path)?,
+        ExportFormat::Html => write_html_report(snapshot, path)?,
+        ExportFormat::Mermaid => write_mermaid(snapshot, path, &MermaidOptions::default())?,
     }
 
     tracing::info!(?path, format = format.as_str(), "exported snapshot");
@@ -147,14 +168,7 @@ fn write_edges_csv(snapshot: &Snapshot, path: &Path) -> Result<()> {
     let mut f = fs::File::create(path).map_err(Error::Io)?;
     writeln!(f, "id,from_id,to_id,kind,level").map_err(Error::Io)?;
     for dep in &snapshot.dependencies {
-        let kind = match &dep.kind {
-            simplineage_core::model::graph::DependencyKind::ViewDefinition => "view_definition",
-            simplineage_core::model::graph::DependencyKind::Pipeline => "pipeline",
-            simplineage_core::model::graph::DependencyKind::ForeignKey => "foreign_key",
-            simplineage_core::model::graph::DependencyKind::Manual => "manual",
-            simplineage_core::model::graph::DependencyKind::Inferred => "inferred",
-            simplineage_core::model::graph::DependencyKind::Other(s) => s.as_str(),
-        };
+        let kind = dep_kind_label(&dep.kind);
         let level = match dep.level {
             simplineage_core::model::graph::DependencyLevel::Relation => "relation",
             simplineage_core::model::graph::DependencyLevel::Column => "column",
@@ -188,7 +202,6 @@ fn write_graphml(snapshot: &Snapshot, path: &Path) -> Result<()> {
     .map_err(Error::Io)?;
 
     let index = snapshot.object_index();
-    // Nodes from catalog + edge endpoints
     let mut seen = std::collections::BTreeSet::new();
     for (id, obj) in &index {
         seen.insert(id.as_str().to_string());
@@ -241,54 +254,6 @@ fn dep_kind_label(kind: &simplineage_core::model::graph::DependencyKind) -> &str
     }
 }
 
-fn write_html_summary(snapshot: &Snapshot, path: &Path) -> Result<()> {
-    let mut f = fs::File::create(path).map_err(Error::Io)?;
-    let label = snapshot.label.as_deref().unwrap_or("(unlabeled)");
-    writeln!(
-        f,
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <title>SimpLineage — {label}</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }}
-    h1 {{ font-size: 1.4rem; }}
-    table {{ border-collapse: collapse; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #ddd; padding: 0.4rem 0.75rem; text-align: left; }}
-    th {{ background: #f4f4f5; }}
-    .muted {{ color: #666; }}
-  </style>
-</head>
-<body>
-  <h1>SimpLineage snapshot</h1>
-  <p class="muted">id: {id} · model: {model} · objects: {objs} · edges: {edges}</p>
-  <h2>Catalog summary</h2>
-  <table>
-    <tr><th>Kind</th><th>Count</th></tr>
-    <tr><td>tables</td><td>{tables}</td></tr>
-    <tr><td>views</td><td>{views}</td></tr>
-    <tr><td>materialized_views</td><td>{mvs}</td></tr>
-    <tr><td>columns</td><td>{columns}</td></tr>
-    <tr><td>dependencies</td><td>{edges}</td></tr>
-  </table>
-  <p class="muted">Generated offline by SimpLineage.</p>
-</body>
-</html>"#,
-        label = html_escape(label),
-        id = html_escape(snapshot.id.as_str()),
-        model = html_escape(snapshot.model_version.as_str()),
-        objs = snapshot.object_count(),
-        edges = snapshot.dependencies.len(),
-        tables = snapshot.tables.len(),
-        views = snapshot.views.len(),
-        mvs = snapshot.materialized_views.len(),
-        columns = snapshot.columns.len(),
-    )
-    .map_err(Error::Io)?;
-    Ok(())
-}
-
 fn csv_escape(s: &str) -> String {
     if s.contains(',') || s.contains('"') || s.contains('\n') {
         format!("\"{}\"", s.replace('"', "\"\""))
@@ -304,13 +269,7 @@ fn xml_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-/// Placeholder HTML exporter (trait object form).
+/// HTML exporter implementing [`Exporter`].
 #[derive(Debug, Default)]
 pub struct HtmlExporter {
     /// Snapshot to export.
@@ -375,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn export_csv_and_graphml() {
+    fn export_csv_graphml_html_mermaid() {
         let dir = std::env::temp_dir().join(format!("sl-export2-{}", uuid_stub()));
         let _ = fs::create_dir_all(&dir);
         let snap = sample();
@@ -383,7 +342,14 @@ mod tests {
         export_snapshot(&snap, &dir.join("e.csv"), ExportFormat::EdgesCsv).unwrap();
         export_snapshot(&snap, &dir.join("g.graphml"), ExportFormat::GraphMl).unwrap();
         export_snapshot(&snap, &dir.join("h.html"), ExportFormat::Html).unwrap();
-        assert!(dir.join("o.csv").exists());
+        export_snapshot(&snap, &dir.join("m.mmd"), ExportFormat::Mermaid).unwrap();
+        let html = fs::read_to_string(dir.join("h.html")).unwrap();
+        assert!(html.contains("btn-export-svg"));
+        assert!(html.contains("btn-export-mermaid"));
+        assert!(html.contains("btn-theme"));
+        assert!(html.contains("report-data"));
+        let mmd = fs::read_to_string(dir.join("m.mmd")).unwrap();
+        assert!(mmd.contains("flowchart"));
         let _ = fs::remove_dir_all(&dir);
     }
 

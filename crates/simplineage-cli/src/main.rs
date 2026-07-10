@@ -238,7 +238,7 @@ enum Commands {
         /// Output path.
         #[arg(short, long)]
         output: PathBuf,
-        /// Format: json, json-pretty, objects-csv, edges-csv, graphml, html, analysis.
+        /// Format: json, json-pretty, objects-csv, edges-csv, graphml, html, mermaid, analysis.
         #[arg(short = 'f', long, default_value = "json-pretty")]
         format: String,
         /// Snapshot id or JSON file.

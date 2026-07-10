@@ -27,8 +27,12 @@ Importers → Normalizer → Storage (SQLite)
                               ↓
                        Analysis Engine
                               ↓
-                   SDK / CLI / Server / HTML UI
+                   SDK / CLI / Server / Offline HTML report
 ```
+
+Interactive HTML reports are generated as **self-contained files** by
+`simplineage-exporters` (no runtime server). See [html-export.md](html-export.md).
+
 
 ## Workspace layout
 

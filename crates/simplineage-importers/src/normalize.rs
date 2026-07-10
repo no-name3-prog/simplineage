@@ -280,6 +280,7 @@ fn add_table(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_stub_table(
     snap: &mut Snapshot,
     catalogs: &mut BTreeMap<String, ObjectId>,

@@ -24,6 +24,8 @@
     relationsOnly: true,
     panning: false,
     panStart: null,
+    /** True if the current pointer gesture moved enough to count as a pan. */
+    panMoved: false,
   };
 
   const RELATION_KINDS = new Set(["table", "view", "materialized_view", "unknown"]);
@@ -104,6 +106,7 @@
     });
     document.getElementById("search").addEventListener("input", (e) => {
       state.search = (e.target.value || "").trim().toLowerCase();
+      updateFocusSummary();
       applyVisibility();
     });
 
@@ -118,6 +121,15 @@
     document.getElementById("btn-down").addEventListener("click", () => runImpact("downstream"));
     document.getElementById("btn-both").addEventListener("click", () => runImpact("both"));
     document.getElementById("btn-clear-impact").addEventListener("click", clearImpact);
+
+    // Click empty canvas to clear selection + impact focus (search stays).
+    svg.addEventListener("click", (e) => {
+      const isNode = e.target.closest && e.target.closest(".node");
+      if (isNode || state.panMoved) return;
+      if (state.selectedId || state.impact) {
+        clearSelection();
+      }
+    });
 
     setupPanZoom();
   }
@@ -156,8 +168,9 @@
     return true;
   }
 
-  function matchesSearch(n) {
-    if (!state.search) return true;
+  /** Text match only (id / FQN / name / kind). Empty search → false. */
+  function isSearchHit(n) {
+    if (!state.search || !n) return false;
     const q = state.search;
     return (
       n.id.toLowerCase().includes(q) ||
@@ -165,6 +178,157 @@
       (n.name && n.name.toLowerCase().includes(q)) ||
       (n.kind && n.kind.toLowerCase().includes(q))
     );
+  }
+
+  function bfs(start, neighborFn) {
+    const seen = new Set();
+    const q = [start];
+    while (q.length) {
+      const u = q.shift();
+      (neighborFn(u) || []).forEach((v) => {
+        if (!seen.has(v) && v !== start) {
+          seen.add(v);
+          q.push(v);
+        }
+      });
+    }
+    return seen;
+  }
+
+  /**
+   * Build lineage neighborhood for one or more seed node ids.
+   * direction: "upstream" | "downstream" | "both"
+   */
+  function lineageSets(seedIds, direction) {
+    const seeds = new Set(seedIds);
+    const up = new Set();
+    const down = new Set();
+    seeds.forEach((seed) => {
+      if (direction !== "downstream") {
+        bfs(seed, (id) => ins.get(id) || []).forEach((x) => {
+          if (!seeds.has(x)) up.add(x);
+        });
+      }
+      if (direction !== "upstream") {
+        bfs(seed, (id) => outs.get(id) || []).forEach((x) => {
+          if (!seeds.has(x)) down.add(x);
+        });
+      }
+    });
+    return { seeds, up, down };
+  }
+
+  /**
+   * Combined focus from impact selection and/or search.
+   * Nodes/edges outside this set are dimmed when `active` is true.
+   */
+  function computeFocus() {
+    const seeds = new Set();
+    const up = new Set();
+    const down = new Set();
+    const matches = new Set();
+    let active = false;
+
+    if (state.impact) {
+      active = true;
+      seeds.add(state.impact.subject);
+      state.impact.up.forEach((id) => up.add(id));
+      state.impact.down.forEach((id) => down.add(id));
+    }
+
+    if (state.search) {
+      const hits = (DATA.nodes || []).filter(isSearchHit);
+      if (hits.length) {
+        active = true;
+        const lin = lineageSets(
+          hits.map((n) => n.id),
+          "both"
+        );
+        hits.forEach((n) => {
+          matches.add(n.id);
+          seeds.add(n.id);
+        });
+        lin.up.forEach((id) => {
+          if (!seeds.has(id)) up.add(id);
+        });
+        lin.down.forEach((id) => {
+          if (!seeds.has(id)) down.add(id);
+        });
+      } else {
+        // Search text with no hits: dim everything visible.
+        active = true;
+      }
+    }
+
+    // Prefer seed membership over up/down when overlapping.
+    up.forEach((id) => {
+      if (seeds.has(id)) up.delete(id);
+    });
+    down.forEach((id) => {
+      if (seeds.has(id)) down.delete(id);
+    });
+
+    function isFocused(id) {
+      return seeds.has(id) || up.has(id) || down.has(id);
+    }
+
+    return { active, seeds, up, down, matches, isFocused };
+  }
+
+  function edgeFocusClass(from, to, focus) {
+    if (!focus.active) return null;
+    const { seeds, up, down, isFocused } = focus;
+    if (!isFocused(from) || !isFocused(to)) return "dim";
+    // Upstream path toward a seed
+    if (up.has(from) && (up.has(to) || seeds.has(to))) return "impact-up";
+    // Downstream path from a seed
+    if (down.has(to) && (down.has(from) || seeds.has(from))) return "impact-down";
+    // Edge between two seeds (e.g. multi-match search)
+    if (seeds.has(from) && seeds.has(to)) return "impact-down";
+    // Connected within neighborhood but not a clean path (still keep bright)
+    return null;
+  }
+
+  function updateFocusSummary() {
+    const el = document.getElementById("impact-summary");
+    if (!el) return;
+    const parts = [];
+    if (state.impact) {
+      const total = new Set([...state.impact.up, ...state.impact.down]).size;
+      parts.push(
+        state.impact.direction +
+          " of selected: " +
+          total +
+          " related (↑" +
+          state.impact.up.size +
+          " ↓" +
+          state.impact.down.size +
+          ")"
+      );
+    }
+    if (state.search) {
+      const focus = computeFocus();
+      const hitCount = focus.matches.size;
+      const related = new Set(
+        [...focus.seeds, ...focus.up, ...focus.down].filter((id) => !focus.matches.has(id))
+      ).size;
+      if (hitCount === 0) {
+        parts.push('search "' + state.search + '": no matches');
+      } else {
+        parts.push(
+          'search "' +
+            state.search +
+            '": ' +
+            hitCount +
+            " match" +
+            (hitCount === 1 ? "" : "es") +
+            " + " +
+            related +
+            " related (↑↓)"
+        );
+      }
+    }
+    el.textContent = parts.join(" · ");
   }
 
   function applyTransform() {
@@ -195,14 +359,18 @@
       const isNode = e.target.closest && e.target.closest(".node");
       if (isNode) return;
       state.panning = true;
+      state.panMoved = false;
       svg.classList.add("panning");
       state.panStart = { x: e.clientX, y: e.clientY, tx: state.tx, ty: state.ty };
       svg.setPointerCapture(e.pointerId);
     });
     svg.addEventListener("pointermove", (e) => {
       if (!state.panning || !state.panStart) return;
-      state.tx = state.panStart.tx + (e.clientX - state.panStart.x);
-      state.ty = state.panStart.ty + (e.clientY - state.panStart.y);
+      const dx = e.clientX - state.panStart.x;
+      const dy = e.clientY - state.panStart.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) state.panMoved = true;
+      state.tx = state.panStart.tx + dx;
+      state.ty = state.panStart.ty + dy;
       applyTransform();
     });
     svg.addEventListener("pointerup", (e) => {
@@ -335,20 +503,31 @@
     (DATA.nodes || []).forEach((n) => {
       if (isVisibleNode(n)) visibleIds.add(n.id);
     });
+    const focus = computeFocus();
 
     nodesG.querySelectorAll(".node").forEach((el) => {
       const n = nodeById(el.dataset.id);
-      const vis = n && visibleIds.has(n.id);
+      const id = el.dataset.id;
+      const vis = n && visibleIds.has(id);
       el.style.display = vis ? "" : "none";
-      el.classList.toggle("dim", vis && state.search && !matchesSearch(n));
-      el.classList.toggle("match", vis && state.search && matchesSearch(n));
-      el.classList.toggle("selected", state.selectedId === el.dataset.id);
-      el.classList.remove("impact-subject", "impact-up", "impact-down");
-      if (state.impact) {
-        if (el.dataset.id === state.impact.subject) el.classList.add("impact-subject");
-        if (state.impact.up.has(el.dataset.id)) el.classList.add("impact-up");
-        if (state.impact.down.has(el.dataset.id)) el.classList.add("impact-down");
+      el.classList.remove("dim", "match", "selected", "impact-subject", "impact-up", "impact-down");
+      if (!vis) return;
+
+      const focused = !focus.active || focus.isFocused(id);
+      if (focus.active && !focused) {
+        el.classList.add("dim");
+        return;
       }
+      if (state.selectedId === id) el.classList.add("selected");
+      if (focus.matches.has(id)) el.classList.add("match");
+      // Impact subject (click selection) takes gold; search-only seeds use match.
+      if (state.impact && id === state.impact.subject) {
+        el.classList.add("impact-subject");
+      } else if (focus.seeds.has(id) && !focus.matches.has(id)) {
+        el.classList.add("impact-subject");
+      }
+      if (focus.up.has(id)) el.classList.add("impact-up");
+      if (focus.down.has(id)) el.classList.add("impact-down");
     });
 
     edgesG.querySelectorAll(".edge").forEach((el) => {
@@ -356,45 +535,25 @@
       el.style.display = ok ? "" : "none";
       el.classList.remove("dim", "impact-up", "impact-down");
       if (!ok) return;
-      if (state.search) {
-        const a = nodeById(el.dataset.from);
-        const b = nodeById(el.dataset.to);
-        const hit = (a && matchesSearch(a)) || (b && matchesSearch(b));
-        el.classList.toggle("dim", !hit);
-      }
-      if (state.impact) {
-        const f = el.dataset.from;
-        const t = el.dataset.to;
-        const sub = state.impact.subject;
-        if (state.impact.up.has(f) && (state.impact.up.has(t) || t === sub)) {
-          el.classList.add("impact-up");
-        } else if (state.impact.down.has(t) && (state.impact.down.has(f) || f === sub)) {
-          el.classList.add("impact-down");
-        } else if (f === sub || t === sub) {
-          if (state.impact.up.has(f) || state.impact.up.has(t)) el.classList.add("impact-up");
-          if (state.impact.down.has(f) || state.impact.down.has(t)) el.classList.add("impact-down");
-        } else {
-          el.classList.add("dim");
-        }
-      }
+      const cls = edgeFocusClass(el.dataset.from, el.dataset.to, focus);
+      if (cls) el.classList.add(cls);
     });
   }
 
-  function selectNode(id) {
-    state.selectedId = id;
-    const n = nodeById(id);
+  function setImpactButtons(hasSelection) {
+    ["btn-up", "btn-down", "btn-both"].forEach((bid) => {
+      document.getElementById(bid).disabled = !hasSelection;
+    });
+    // Clear resets click/impact focus (search box is cleared separately by the user).
+    document.getElementById("btn-clear-impact").disabled = !state.impact && !hasSelection;
+  }
+
+  function fillDetailPanel(n) {
     const empty = document.getElementById("detail-empty");
     const body = document.getElementById("detail-body");
-    const enable = !!n;
-    ["btn-up", "btn-down", "btn-both", "btn-clear-impact"].forEach((bid) => {
-      document.getElementById(bid).disabled = !enable && bid !== "btn-clear-impact";
-    });
-    document.getElementById("btn-clear-impact").disabled = !state.impact && !enable;
-
     if (!n) {
       empty.classList.remove("hidden");
       body.classList.add("hidden");
-      applyVisibility();
       return;
     }
     empty.classList.add("hidden");
@@ -406,8 +565,8 @@
     document.getElementById("d-desc").textContent = n.description || "No description.";
 
     const neigh = document.getElementById("d-neighbors");
-    const up = ins.get(id) || [];
-    const down = outs.get(id) || [];
+    const up = ins.get(n.id) || [];
+    const down = outs.get(n.id) || [];
     let html = "";
     if (up.length) {
       html += "<div class='muted'>Upstream (" + up.length + ")</div>";
@@ -438,53 +597,54 @@
     neigh.querySelectorAll(".chip").forEach((el) => {
       el.addEventListener("click", () => selectNode(el.dataset.id));
     });
-    applyVisibility();
   }
 
-  function bfs(start, neighborFn) {
-    const seen = new Set();
-    const q = [start];
-    while (q.length) {
-      const u = q.shift();
-      (neighborFn(u) || []).forEach((v) => {
-        if (!seen.has(v) && v !== start) {
-          seen.add(v);
-          q.push(v);
-        }
-      });
+  /**
+   * Select a node: show details and auto-focus its full upstream + downstream
+   * (dim everything else). Upstream/Downstream/Both buttons narrow the focus.
+   */
+  function selectNode(id) {
+    state.selectedId = id;
+    const n = nodeById(id);
+    setImpactButtons(!!n);
+    fillDetailPanel(n);
+    if (!n) {
+      state.impact = null;
+      updateFocusSummary();
+      applyVisibility();
+      return;
     }
-    return seen;
+    // Default: both directions on every selection.
+    runImpact("both");
   }
 
   function runImpact(direction) {
     if (!state.selectedId) return;
     const subject = state.selectedId;
-    const up =
-      direction === "downstream" ? new Set() : bfs(subject, (id) => ins.get(id) || []);
-    const down =
-      direction === "upstream" ? new Set() : bfs(subject, (id) => outs.get(id) || []);
-    state.impact = { subject, direction, up, down };
-    document.getElementById("btn-clear-impact").disabled = false;
-    const total = new Set([...up, ...down]).size;
-    document.getElementById("impact-summary").textContent =
-      direction +
-      " of " +
-      subject +
-      ": " +
-      total +
-      " affected (↑" +
-      up.size +
-      " ↓" +
-      down.size +
-      ")";
+    const lin = lineageSets([subject], direction);
+    state.impact = {
+      subject: subject,
+      direction: direction,
+      up: lin.up,
+      down: lin.down,
+    };
+    setImpactButtons(true);
+    updateFocusSummary();
+    applyVisibility();
+  }
+
+  /** Reset click selection + impact focus. Search query is left unchanged. */
+  function clearSelection() {
+    state.selectedId = null;
+    state.impact = null;
+    setImpactButtons(false);
+    fillDetailPanel(null);
+    updateFocusSummary();
     applyVisibility();
   }
 
   function clearImpact() {
-    state.impact = null;
-    document.getElementById("impact-summary").textContent = "";
-    document.getElementById("btn-clear-impact").disabled = !state.selectedId;
-    applyVisibility();
+    clearSelection();
   }
 
   function exportSvg() {

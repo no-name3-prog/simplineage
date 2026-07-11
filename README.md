@@ -155,7 +155,7 @@ open lineage.html
 # Linux: xdg-open lineage.html
 ```
 
-In the HTML page you can zoom, pan, search tables, filter kinds, click a node for details, run upstream/downstream impact, toggle dark mode, and download SVG or Mermaid.
+In the HTML page you can zoom, pan, search tables (matches + their lineage stay bright), filter kinds, click a node to focus its upstream/downstream (others dim), toggle dark mode, and download SVG or Mermaid.
 
 More detail: [examples/production_warehouse_lineage/README.md](examples/production_warehouse_lineage/README.md).
 

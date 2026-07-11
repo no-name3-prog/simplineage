@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Offline HTML reports: **click a node** auto-highlights its full upstream/downstream and dims the rest; **search** keeps matches plus their lineage neighborhood bright (others dim). Upstream/Downstream/Both still narrow focus; Clear or empty-canvas click resets selection.
 - Maintainer bot reviews PRs only; **human final approval** is required to merge (no automated squash-merge)
 
 ### Added

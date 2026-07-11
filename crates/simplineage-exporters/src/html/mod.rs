@@ -240,7 +240,7 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
         <label class="check"><input type="checkbox" id="hide-isolated"/> Hide isolated</label>
         <label class="check"><input type="checkbox" id="relations-only" checked/> Relations only</label>
         <h2>Impact</h2>
-        <p class="hint">Select a node, then run impact analysis.</p>
+        <p class="hint">Click a node to auto-highlight its upstream and downstream (others dim). Search does the same for matches. Narrow with Upstream / Downstream / Both.</p>
         <div class="btn-row">
           <button type="button" id="btn-up" class="btn" disabled>Upstream</button>
           <button type="button" id="btn-down" class="btn" disabled>Downstream</button>
@@ -263,11 +263,11 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
             <g id="nodes"></g>
           </g>
         </svg>
-        <div class="canvas-hint muted">Scroll to zoom · drag background to pan · click a node for details</div>
+        <div class="canvas-hint muted">Scroll to zoom · drag to pan · click a node to focus lineage · click empty canvas to clear</div>
       </section>
       <aside class="sidebar right" id="detail-panel">
         <h2>Details</h2>
-        <div id="detail-empty" class="muted">Select a node to inspect metadata and run impact analysis.</div>
+        <div id="detail-empty" class="muted">Select a node to inspect metadata; its upstream and downstream are highlighted automatically.</div>
         <div id="detail-body" class="hidden">
           <div class="detail-kind" id="d-kind"></div>
           <h3 id="d-name"></h3>
@@ -635,5 +635,9 @@ mod tests {
         assert!(html.contains("table:orders"));
         assert!(!html.contains("</script><script>")); // sanity
         assert!(html.contains("data-theme"));
+        // Focus / dim behaviour is embedded in the offline JS payload.
+        assert!(html.contains("computeFocus"));
+        assert!(html.contains("lineageSets"));
+        assert!(html.contains("auto-highlight"));
     }
 }

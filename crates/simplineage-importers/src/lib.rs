@@ -41,6 +41,7 @@ pub mod normalize;
 pub mod options;
 pub mod plugin;
 pub mod registry;
+pub mod tabular;
 
 pub use formats::{CsvImporter, ExcelImporter, JsonImporter, ParquetImporter};
 pub use intermediate::{

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use simplineage_core::{Error, Result, Snapshot};
 
-use crate::html::{ReportData, build_report_data};
+use crate::html::{ReportData, build_export_graph};
 
 /// Options controlling Mermaid diagram generation.
 #[derive(Debug, Clone)]
@@ -32,7 +32,8 @@ impl Default for MermaidOptions {
 /// Render a Mermaid `flowchart` document from a snapshot.
 #[must_use]
 pub fn render_mermaid(snapshot: &Snapshot, opts: &MermaidOptions) -> String {
-    render_mermaid_from_data(&build_report_data(snapshot), opts)
+    // Skip expensive layered HTML layout — Mermaid only needs ids/edges/labels.
+    render_mermaid_from_data(&build_export_graph(snapshot), opts)
 }
 
 /// Render Mermaid from prebuilt report data.

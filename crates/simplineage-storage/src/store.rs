@@ -506,44 +506,19 @@ impl Store {
 }
 
 fn dep_kind_str(k: &DependencyKind) -> String {
-    match k {
-        DependencyKind::ViewDefinition => "view_definition".into(),
-        DependencyKind::Pipeline => "pipeline".into(),
-        DependencyKind::ForeignKey => "foreign_key".into(),
-        DependencyKind::Manual => "manual".into(),
-        DependencyKind::Inferred => "inferred".into(),
-        DependencyKind::Other(s) => format!("other:{s}"),
-    }
+    k.as_str().into_owned()
 }
 
 fn dep_level_str(l: DependencyLevel) -> &'static str {
-    match l {
-        DependencyLevel::Relation => "relation",
-        DependencyLevel::Column => "column",
-        DependencyLevel::Unknown => "unknown",
-    }
+    l.as_str()
 }
 
 fn parse_dep_kind(s: &str) -> DependencyKind {
-    if let Some(rest) = s.strip_prefix("other:") {
-        return DependencyKind::Other(rest.to_string());
-    }
-    match s {
-        "view_definition" => DependencyKind::ViewDefinition,
-        "pipeline" => DependencyKind::Pipeline,
-        "foreign_key" => DependencyKind::ForeignKey,
-        "manual" => DependencyKind::Manual,
-        "inferred" => DependencyKind::Inferred,
-        other => DependencyKind::Other(other.to_string()),
-    }
+    DependencyKind::parse(s)
 }
 
 fn parse_dep_level(s: &str) -> DependencyLevel {
-    match s {
-        "relation" => DependencyLevel::Relation,
-        "column" => DependencyLevel::Column,
-        _ => DependencyLevel::Unknown,
-    }
+    DependencyLevel::parse(s)
 }
 
 fn now_string() -> String {

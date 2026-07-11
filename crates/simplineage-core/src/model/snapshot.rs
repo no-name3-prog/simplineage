@@ -131,6 +131,9 @@ impl Snapshot {
     }
 
     /// Index all objects by id.
+    ///
+    /// **Note:** this clones every catalog object. Prefer [`Self::kind_index`],
+    /// [`Self::contains_object`], or field iteration when full objects are not required.
     #[must_use]
     pub fn object_index(&self) -> BTreeMap<ObjectId, MetadataObject> {
         let mut map = BTreeMap::new();
@@ -161,9 +164,9 @@ impl Snapshot {
         map
     }
 
-    /// Collect every object id present in the snapshot (objects + edges).
+    /// Cheap id → kind map without cloning full objects (catalog objects only).
     #[must_use]
-    pub fn all_ids(&self) -> BTreeMap<ObjectId, &'static str> {
+    pub fn kind_index(&self) -> BTreeMap<ObjectId, &'static str> {
         let mut ids = BTreeMap::new();
         for c in &self.catalogs {
             ids.insert(c.meta.id.clone(), "catalog");
@@ -186,6 +189,29 @@ impl Snapshot {
         for c in &self.columns {
             ids.insert(c.meta.id.clone(), "column");
         }
+        ids
+    }
+
+    /// Whether a catalog object with this id exists (no full index clone).
+    #[must_use]
+    pub fn contains_object(&self, id: &ObjectId) -> bool {
+        let s = id.as_str();
+        self.catalogs.iter().any(|c| c.meta.id.as_str() == s)
+            || self.databases.iter().any(|d| d.meta.id.as_str() == s)
+            || self.schemas.iter().any(|x| x.meta.id.as_str() == s)
+            || self.tables.iter().any(|t| t.meta.id.as_str() == s)
+            || self.views.iter().any(|v| v.meta.id.as_str() == s)
+            || self
+                .materialized_views
+                .iter()
+                .any(|m| m.meta.id.as_str() == s)
+            || self.columns.iter().any(|c| c.meta.id.as_str() == s)
+    }
+
+    /// Collect every object id present in the snapshot (objects + edges).
+    #[must_use]
+    pub fn all_ids(&self) -> BTreeMap<ObjectId, &'static str> {
+        let mut ids = self.kind_index();
         for r in &self.relationships {
             ids.insert(r.id.clone(), "relationship");
         }

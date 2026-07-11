@@ -6,13 +6,11 @@ use calamine::{Data, Reader, open_workbook_auto};
 use simplineage_core::{Error, Result, Snapshot};
 
 use crate::detect::{has_extension, looks_like_excel};
-use crate::intermediate::{
-    IntermediateCatalog, IntermediateColumn, IntermediateDependency, IntermediateRelationship,
-    IntermediateTable,
-};
+use crate::intermediate::IntermediateCatalog;
 use crate::normalize::intermediate_to_snapshot;
 use crate::options::ImportOptions;
 use crate::plugin::{DetectConfidence, MetadataImporter};
+use crate::tabular::{self, FieldGet};
 
 /// Imports metadata from Excel workbooks.
 ///
@@ -91,92 +89,19 @@ fn parse_excel(path: &Path) -> Result<IntermediateCatalog> {
             continue;
         }
 
-        let idx = |names: &[&str]| -> Option<usize> {
-            headers.iter().position(|h| names.iter().any(|n| h == n))
-        };
-
         for row in rows {
-            let get = |names: &[&str]| -> Option<String> {
-                idx(names)
-                    .and_then(|i| row.get(i).map(cell_string))
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
+            let accessor = ExcelRow {
+                headers: &headers,
+                row,
             };
-            let get_bool = |names: &[&str]| {
-                get(names).and_then(|s| match s.to_ascii_lowercase().as_str() {
-                    "1" | "true" | "yes" | "y" => Some(true),
-                    "0" | "false" | "no" | "n" => Some(false),
-                    _ => None,
-                })
-            };
-            let get_u32 = |names: &[&str]| get(names).and_then(|s| s.parse().ok());
-
             if lower.contains("column") {
-                let Some(table) = get(&["table", "table_name", "relation"]) else {
-                    continue;
-                };
-                let Some(col) = get(&["column", "column_name", "name", "field"]) else {
-                    continue;
-                };
-                cat.columns.push(IntermediateColumn {
-                    catalog: get(&["catalog"]),
-                    database: get(&["database", "db"]),
-                    schema: get(&["schema", "schema_name"]),
-                    table,
-                    name: col,
-                    data_type: get(&["data_type", "type"]),
-                    nullable: get_bool(&["nullable"]),
-                    ordinal: get_u32(&["ordinal", "ordinal_position", "position"]),
-                    is_primary_key: get_bool(&["is_primary_key", "pk"]),
-                    description: get(&["description", "comment"]),
-                });
+                let _ = tabular::push_column(&mut cat, &accessor);
             } else if lower.contains("relationship") {
-                let Some(from_table) = get(&["from_table", "table"]) else {
-                    continue;
-                };
-                let Some(to_table) = get(&["to_table", "ref_table"]) else {
-                    continue;
-                };
-                cat.relationships.push(IntermediateRelationship {
-                    name: get(&["name"]),
-                    kind: get(&["kind"]),
-                    from_schema: get(&["from_schema", "schema"]),
-                    from_table,
-                    from_column: get(&["from_column", "column"]),
-                    to_schema: get(&["to_schema"]),
-                    to_table,
-                    to_column: get(&["to_column"]),
-                });
+                let _ = tabular::push_relationship(&mut cat, &accessor);
             } else if lower.contains("depend") || lower.contains("lineage") {
-                let Some(from_table) = get(&["from_table", "upstream_table", "source_table"])
-                else {
-                    continue;
-                };
-                let Some(to_table) = get(&["to_table", "downstream_table", "target_table"]) else {
-                    continue;
-                };
-                cat.dependencies.push(IntermediateDependency {
-                    from_schema: get(&["from_schema"]),
-                    from_table,
-                    from_column: get(&["from_column"]),
-                    to_schema: get(&["to_schema"]),
-                    to_table,
-                    to_column: get(&["to_column"]),
-                    kind: get(&["kind"]),
-                });
+                let _ = tabular::push_dependency(&mut cat, &accessor);
             } else if lower.contains("table") || lower == "relations" {
-                let Some(name) = get(&["table", "table_name", "name", "relation"]) else {
-                    continue;
-                };
-                cat.tables.push(IntermediateTable {
-                    catalog: get(&["catalog"]),
-                    database: get(&["database", "db"]),
-                    schema: get(&["schema", "schema_name"]),
-                    name,
-                    kind: get(&["kind", "table_type"]),
-                    definition: get(&["definition", "sql"]),
-                    description: get(&["description", "comment"]),
-                });
+                tabular::push_table(&mut cat, &accessor, None);
             }
         }
     }
@@ -206,5 +131,24 @@ fn cell_string(cell: &Data) -> String {
         Data::DateTime(dt) => format!("{dt:?}"),
         Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
         Data::Error(e) => format!("#ERR{e:?}"),
+    }
+}
+
+struct ExcelRow<'a> {
+    headers: &'a [String],
+    row: &'a [Data],
+}
+
+impl FieldGet for ExcelRow<'_> {
+    fn get(&self, names: &[&str]) -> Option<String> {
+        let i = self
+            .headers
+            .iter()
+            .position(|h| names.iter().any(|n| h == n))?;
+        self.row
+            .get(i)
+            .map(cell_string)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     }
 }

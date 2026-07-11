@@ -105,6 +105,16 @@ pub struct ReportEdge {
 /// Build structured report data from a snapshot (with layered layout).
 #[must_use]
 pub fn build_report_data(snapshot: &Snapshot) -> ReportData {
+    build_report_data_inner(snapshot, true)
+}
+
+/// Nodes + edges only (positions zeroed). Prefer for Mermaid/text exports.
+#[must_use]
+pub fn build_export_graph(snapshot: &Snapshot) -> ReportData {
+    build_report_data_inner(snapshot, false)
+}
+
+fn build_report_data_inner(snapshot: &Snapshot, layout: bool) -> ReportData {
     let index = snapshot.object_index();
     let mut nodes_map: BTreeMap<String, ReportNode> = BTreeMap::new();
 
@@ -148,16 +158,14 @@ pub fn build_report_data(snapshot: &Snapshot) -> ReportData {
             id: d.id.to_string(),
             from: d.from_id.to_string(),
             to: d.to_id.to_string(),
-            kind: dep_kind_label(&d.kind).to_string(),
-            level: match d.level {
-                simplineage_core::model::graph::DependencyLevel::Relation => "relation".into(),
-                simplineage_core::model::graph::DependencyLevel::Column => "column".into(),
-                simplineage_core::model::graph::DependencyLevel::Unknown => "unknown".into(),
-            },
+            kind: dep_kind_label(&d.kind),
+            level: d.level.as_str().into(),
         })
         .collect();
 
-    assign_layers_and_positions(&mut nodes_map, &edges);
+    if layout {
+        assign_layers_and_positions(&mut nodes_map, &edges);
+    }
 
     let mut nodes: Vec<ReportNode> = nodes_map.into_values().collect();
     nodes.sort_by(|a, b| a.layer.cmp(&b.layer).then_with(|| a.fqn.cmp(&b.fqn)));
@@ -382,45 +390,42 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
     }
 
     // Barycenter ordering: keep nodes near their neighbors to shorten edges.
+    // Use rank maps keyed by &str borrowed from owned id strings in by_layer.
     const ORDER_PASSES: usize = 6;
     for _ in 0..ORDER_PASSES {
         let layers: Vec<usize> = by_layer.keys().copied().collect();
-        // Sweep left → right using upstream barycenters.
         for l in layers.iter().copied().skip(1) {
-            let prev = match by_layer.get(&(l.saturating_sub(1))) {
-                Some(p) if !p.is_empty() => p.clone(),
+            let ranks: HashMap<String, usize> = match by_layer.get(&(l.saturating_sub(1))) {
+                Some(p) if !p.is_empty() => p
+                    .iter()
+                    .enumerate()
+                    .map(|(i, id)| (id.clone(), i))
+                    .collect(),
                 _ => continue,
             };
-            let index: HashMap<String, usize> = prev
-                .iter()
-                .enumerate()
-                .map(|(i, id)| (id.clone(), i))
-                .collect();
             if let Some(ids) = by_layer.get_mut(&l) {
                 ids.sort_by(|a, b| {
-                    let ba = barycenter(a, &ins, &index);
-                    let bb = barycenter(b, &ins, &index);
+                    let ba = barycenter(a, &ins, &ranks);
+                    let bb = barycenter(b, &ins, &ranks);
                     ba.partial_cmp(&bb)
                         .unwrap_or(std::cmp::Ordering::Equal)
                         .then_with(|| a.cmp(b))
                 });
             }
         }
-        // Sweep right → left using downstream barycenters.
         for l in layers.into_iter().rev().skip(1) {
-            let next = match by_layer.get(&(l + 1)) {
-                Some(n) if !n.is_empty() => n.clone(),
+            let ranks: HashMap<String, usize> = match by_layer.get(&(l + 1)) {
+                Some(n) if !n.is_empty() => n
+                    .iter()
+                    .enumerate()
+                    .map(|(i, id)| (id.clone(), i))
+                    .collect(),
                 _ => continue,
             };
-            let index: HashMap<String, usize> = next
-                .iter()
-                .enumerate()
-                .map(|(i, id)| (id.clone(), i))
-                .collect();
             if let Some(ids) = by_layer.get_mut(&l) {
                 ids.sort_by(|a, b| {
-                    let ba = barycenter(a, &outs, &index);
-                    let bb = barycenter(b, &outs, &index);
+                    let ba = barycenter(a, &outs, &ranks);
+                    let bb = barycenter(b, &outs, &ranks);
                     ba.partial_cmp(&bb)
                         .unwrap_or(std::cmp::Ordering::Equal)
                         .then_with(|| a.cmp(b))
@@ -519,14 +524,11 @@ fn leaf_name(s: &str) -> String {
     s.rsplit(['.', '/', ':']).next().unwrap_or(s).to_string()
 }
 
-fn dep_kind_label(kind: &DependencyKind) -> &str {
+fn dep_kind_label(kind: &DependencyKind) -> String {
     match kind {
-        DependencyKind::ViewDefinition => "view_definition",
-        DependencyKind::Pipeline => "pipeline",
-        DependencyKind::ForeignKey => "foreign_key",
-        DependencyKind::Manual => "manual",
-        DependencyKind::Inferred => "inferred",
-        DependencyKind::Other(s) => s.as_str(),
+        // Keep short label for Other (not other: prefix) in the HTML payload.
+        DependencyKind::Other(s) => s.clone(),
+        other => other.as_str().into_owned(),
     }
 }
 

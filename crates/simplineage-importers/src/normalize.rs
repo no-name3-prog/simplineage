@@ -605,13 +605,8 @@ fn parse_rel_kind(kind: Option<&str>) -> RelationshipKind {
 }
 
 fn parse_dep_kind(kind: Option<&str>) -> DependencyKind {
-    match kind.map(|s| s.to_ascii_lowercase()).as_deref() {
-        Some("view_definition") | Some("view") => DependencyKind::ViewDefinition,
-        Some("pipeline") | Some("etl") => DependencyKind::Pipeline,
-        Some("foreign_key") | Some("fk") => DependencyKind::ForeignKey,
-        Some("manual") => DependencyKind::Manual,
-        Some("inferred") => DependencyKind::Inferred,
-        Some(other) => DependencyKind::Other(other.to_string()),
+    match kind {
+        Some(s) => DependencyKind::parse(s),
         None => DependencyKind::Inferred,
     }
 }

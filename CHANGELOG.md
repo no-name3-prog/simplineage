@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Performance / dedup (P0–P1):** cheaper catalog lookups (`Snapshot::kind_index` / `contains_object`); analysis engine avoids repeated full `object_index` clones; shared tabular CSV/Excel/Parquet row mapping; unified `DependencyKind`/`DependencyLevel` parse/display; snapshot merge without double-cloning collections; Mermaid export skips HTML layered layout
 - Offline HTML reports: **click a node** auto-highlights its full upstream/downstream and dims the rest; **search** keeps matches plus their lineage neighborhood bright (others dim). Upstream/Downstream/Both still narrow focus; Clear or empty-canvas click resets selection.
 - Maintainer bot reviews PRs only; **human final approval** is required to merge (no automated squash-merge)
 
 ### Added
 
 - Docker usage guide ([docs/docker.md](docs/docker.md)): runtime CLI image, volume mounts for samples/HTML export, and dev profile
+- `Snapshot::kind_index` / `contains_object`; `build_export_graph` for lightweight Mermaid/text exports; `importers::tabular` shared field aliases
 - Phase 7 offline interactive HTML lineage report: pan/zoom, search, filters, metadata panel, client-side impact analysis, dark mode, SVG + Mermaid export (no server); `export -f mermaid`
 - Phase 6 professional CLI (`simplineage`): clap subcommands import/build/search/upstream/downstream/impact/validate/stats/compare/export with colored output, progress bars, JSON mode, and exporters (JSON/CSV/GraphML/HTML/analysis)
 - BigQuery INFORMATION_SCHEMA CSV demo (`examples/bigquery_information_schema`) with table_catalog/table_type/is_nullable mapping, directory merge + FQN reconcile

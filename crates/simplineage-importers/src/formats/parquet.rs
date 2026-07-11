@@ -11,10 +11,11 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use simplineage_core::{Error, Result, Snapshot};
 
 use crate::detect::{has_extension, looks_like_parquet};
-use crate::intermediate::{IntermediateCatalog, IntermediateColumn, IntermediateTable};
+use crate::intermediate::IntermediateCatalog;
 use crate::normalize::intermediate_to_snapshot;
 use crate::options::ImportOptions;
 use crate::plugin::{DetectConfidence, MetadataImporter};
+use crate::tabular::{self, FieldGet};
 
 /// Imports metadata from Parquet files with table/column-style columns.
 #[derive(Debug, Default)]
@@ -101,36 +102,9 @@ fn parse_parquet(path: &Path) -> Result<IntermediateCatalog> {
         let rows = batch_to_string_rows(&batch)?;
         for row in rows {
             if is_columns {
-                let table = pick(&row, &["table", "table_name", "relation"]);
-                let name = pick(&row, &["column", "column_name", "name", "field"]);
-                let (Some(table), Some(name)) = (table, name) else {
-                    continue;
-                };
-                cat.columns.push(IntermediateColumn {
-                    catalog: pick(&row, &["catalog"]),
-                    database: pick(&row, &["database", "db"]),
-                    schema: pick(&row, &["schema", "schema_name"]),
-                    table,
-                    name,
-                    data_type: pick(&row, &["data_type", "type", "column_type"]),
-                    nullable: pick(&row, &["nullable"]).and_then(parse_bool),
-                    ordinal: pick(&row, &["ordinal", "ordinal_position"])
-                        .and_then(|s| s.parse().ok()),
-                    is_primary_key: pick(&row, &["is_primary_key", "pk"]).and_then(parse_bool),
-                    description: pick(&row, &["description", "comment"]),
-                });
+                let _ = tabular::push_column(&mut cat, &row);
             } else {
-                let name = pick(&row, &["table", "table_name", "name", "relation"]);
-                let Some(name) = name else { continue };
-                cat.tables.push(IntermediateTable {
-                    catalog: pick(&row, &["catalog"]),
-                    database: pick(&row, &["database", "db"]),
-                    schema: pick(&row, &["schema", "schema_name"]),
-                    name,
-                    kind: pick(&row, &["kind", "table_type"]),
-                    definition: pick(&row, &["definition", "sql"]),
-                    description: pick(&row, &["description", "comment"]),
-                });
+                tabular::push_table(&mut cat, &row, None);
             }
         }
     }
@@ -174,21 +148,15 @@ fn batch_to_string_rows(batch: &RecordBatch) -> Result<Vec<HashMapLike>> {
 #[derive(Default)]
 struct HashMapLike(std::collections::HashMap<String, String>);
 
-fn pick(row: &HashMapLike, names: &[&str]) -> Option<String> {
-    for n in names {
-        if let Some(v) = row.0.get(*n) {
-            if !v.trim().is_empty() {
-                return Some(v.clone());
+impl FieldGet for HashMapLike {
+    fn get(&self, names: &[&str]) -> Option<String> {
+        for n in names {
+            if let Some(v) = self.0.get(*n) {
+                if !v.trim().is_empty() {
+                    return Some(v.clone());
+                }
             }
         }
-    }
-    None
-}
-
-fn parse_bool(s: String) -> Option<bool> {
-    match s.to_ascii_lowercase().as_str() {
-        "1" | "true" | "t" | "yes" => Some(true),
-        "0" | "false" | "f" | "no" => Some(false),
-        _ => None,
+        None
     }
 }

@@ -27,6 +27,9 @@ impl ImportMode {
 }
 
 /// Merge `incoming` into `base` (id-stable union). Produces a new snapshot id.
+///
+/// Clones `base` once, then unions each collection by taking ownership of the
+/// base vectors (no second full-vector clone) and cloning only incoming items.
 #[must_use]
 pub fn merge_snapshots(base: &Snapshot, incoming: &Snapshot) -> Snapshot {
     let mut out = base.clone();
@@ -44,38 +47,40 @@ pub fn merge_snapshots(base: &Snapshot, incoming: &Snapshot) -> Snapshot {
     // Prefer newer model version string if same major (caller validates)
     out.model_version = incoming.model_version.clone();
 
-    out.catalogs = union_by_id(base.catalogs.clone(), incoming.catalogs.clone(), |c| {
-        c.meta.id.clone()
+    out.catalogs = union_by_id(std::mem::take(&mut out.catalogs), &incoming.catalogs, |c| {
+        &c.meta.id
     });
-    out.databases = union_by_id(base.databases.clone(), incoming.databases.clone(), |d| {
-        d.meta.id.clone()
+    out.databases = union_by_id(
+        std::mem::take(&mut out.databases),
+        &incoming.databases,
+        |d| &d.meta.id,
+    );
+    out.schemas = union_by_id(std::mem::take(&mut out.schemas), &incoming.schemas, |s| {
+        &s.meta.id
     });
-    out.schemas = union_by_id(base.schemas.clone(), incoming.schemas.clone(), |s| {
-        s.meta.id.clone()
+    out.tables = union_by_id(std::mem::take(&mut out.tables), &incoming.tables, |t| {
+        &t.meta.id
     });
-    out.tables = union_by_id(base.tables.clone(), incoming.tables.clone(), |t| {
-        t.meta.id.clone()
-    });
-    out.views = union_by_id(base.views.clone(), incoming.views.clone(), |v| {
-        v.meta.id.clone()
+    out.views = union_by_id(std::mem::take(&mut out.views), &incoming.views, |v| {
+        &v.meta.id
     });
     out.materialized_views = union_by_id(
-        base.materialized_views.clone(),
-        incoming.materialized_views.clone(),
-        |m| m.meta.id.clone(),
+        std::mem::take(&mut out.materialized_views),
+        &incoming.materialized_views,
+        |m| &m.meta.id,
     );
-    out.columns = union_by_id(base.columns.clone(), incoming.columns.clone(), |c| {
-        c.meta.id.clone()
+    out.columns = union_by_id(std::mem::take(&mut out.columns), &incoming.columns, |c| {
+        &c.meta.id
     });
     out.relationships = union_by_id(
-        base.relationships.clone(),
-        incoming.relationships.clone(),
-        |r| r.id.clone(),
+        std::mem::take(&mut out.relationships),
+        &incoming.relationships,
+        |r| &r.id,
     );
     out.dependencies = union_by_id(
-        base.dependencies.clone(),
-        incoming.dependencies.clone(),
-        |d| d.id.clone(),
+        std::mem::take(&mut out.dependencies),
+        &incoming.dependencies,
+        |d| &d.id,
     );
 
     // Merge attributes (incoming wins on key conflict)
@@ -85,23 +90,19 @@ pub fn merge_snapshots(base: &Snapshot, incoming: &Snapshot) -> Snapshot {
     out
 }
 
-fn union_by_id<T, F>(mut base: Vec<T>, incoming: Vec<T>, id_of: F) -> Vec<T>
+fn union_by_id<T, F>(mut base: Vec<T>, incoming: &[T], id_of: F) -> Vec<T>
 where
-    F: Fn(&T) -> ObjectId,
+    T: Clone,
+    F: Fn(&T) -> &ObjectId,
 {
-    let mut seen: HashSet<String> = base.iter().map(|t| id_of(t).to_string()).collect();
+    let mut seen: HashSet<String> = base.iter().map(|t| id_of(t).as_str().to_string()).collect();
     for item in incoming {
-        let id = id_of(&item).to_string();
-        if seen.insert(id) {
-            base.push(item);
-        } else {
+        let id = id_of(item).as_str();
+        if seen.insert(id.to_string()) {
+            base.push(item.clone());
+        } else if let Some(pos) = base.iter().position(|t| id_of(t).as_str() == id) {
             // Replace existing with incoming (last-write-wins by id)
-            if let Some(pos) = base
-                .iter()
-                .position(|t| id_of(t).as_str() == id_of(&item).as_str())
-            {
-                base[pos] = item;
-            }
+            base[pos] = item.clone();
         }
     }
     base

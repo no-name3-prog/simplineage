@@ -101,6 +101,43 @@ pub enum DependencyKind {
     Other(String),
 }
 
+impl DependencyKind {
+    /// Canonical wire / storage label (`view_definition`, `pipeline`, …).
+    ///
+    /// `Other` values are emitted as `other:{name}`.
+    #[must_use]
+    pub fn as_str(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::ViewDefinition => "view_definition".into(),
+            Self::Pipeline => "pipeline".into(),
+            Self::ForeignKey => "foreign_key".into(),
+            Self::Manual => "manual".into(),
+            Self::Inferred => "inferred".into(),
+            Self::Other(s) => std::borrow::Cow::Owned(format!("other:{s}")),
+        }
+    }
+
+    /// Parse a storage or import label into a kind.
+    ///
+    /// Accepts canonical names plus common aliases (`view`, `etl`, `fk`, …).
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        let t = s.trim();
+        if let Some(rest) = t.strip_prefix("other:") {
+            return Self::Other(rest.to_string());
+        }
+        match t.to_ascii_lowercase().as_str() {
+            "view_definition" | "view" => Self::ViewDefinition,
+            "pipeline" | "etl" | "dbt_model" => Self::Pipeline,
+            "foreign_key" | "fk" | "foreign key" => Self::ForeignKey,
+            "manual" => Self::Manual,
+            "inferred" => Self::Inferred,
+            "" => Self::Inferred,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
 /// Lineage edge granularity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -112,6 +149,28 @@ pub enum DependencyLevel {
     Column,
     /// Mixed or unknown.
     Unknown,
+}
+
+impl DependencyLevel {
+    /// Canonical wire / storage label.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Relation => "relation",
+            Self::Column => "column",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Parse a storage or import label.
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "relation" | "table" => Self::Relation,
+            "column" => Self::Column,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// Serde-friendly wrapper for a confidence score without depending on `ordered-float`.
@@ -155,5 +214,24 @@ mod tests {
         let json = serde_json::to_string(&d).unwrap();
         let back: Dependency = serde_json::from_str(&json).unwrap();
         assert_eq!(d, back);
+    }
+
+    #[test]
+    fn dependency_kind_parse_roundtrip() {
+        for k in [
+            DependencyKind::ViewDefinition,
+            DependencyKind::Pipeline,
+            DependencyKind::ForeignKey,
+            DependencyKind::Manual,
+            DependencyKind::Inferred,
+            DependencyKind::Other("dbt".into()),
+        ] {
+            let wire = k.as_str();
+            assert_eq!(DependencyKind::parse(&wire), k);
+        }
+        assert_eq!(DependencyKind::parse("etl"), DependencyKind::Pipeline);
+        assert_eq!(DependencyKind::parse("fk"), DependencyKind::ForeignKey);
+        assert_eq!(DependencyLevel::parse("column"), DependencyLevel::Column);
+        assert_eq!(DependencyLevel::Relation.as_str(), "relation");
     }
 }

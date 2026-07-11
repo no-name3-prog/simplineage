@@ -21,7 +21,9 @@ use std::path::Path;
 
 use simplineage_core::{Error, Result, Snapshot};
 
-pub use html::{ReportData, build_report_data, render_html_report, write_html_report};
+pub use html::{
+    ReportData, build_export_graph, build_report_data, render_html_report, write_html_report,
+};
 pub use mermaid::{MermaidOptions, render_mermaid, write_mermaid};
 
 /// Supported export formats for CLI and library callers.
@@ -169,11 +171,6 @@ fn write_edges_csv(snapshot: &Snapshot, path: &Path) -> Result<()> {
     writeln!(f, "id,from_id,to_id,kind,level").map_err(Error::Io)?;
     for dep in &snapshot.dependencies {
         let kind = dep_kind_label(&dep.kind);
-        let level = match dep.level {
-            simplineage_core::model::graph::DependencyLevel::Relation => "relation",
-            simplineage_core::model::graph::DependencyLevel::Column => "column",
-            simplineage_core::model::graph::DependencyLevel::Unknown => "unknown",
-        };
         writeln!(
             f,
             "{},{},{},{},{}",
@@ -181,7 +178,7 @@ fn write_edges_csv(snapshot: &Snapshot, path: &Path) -> Result<()> {
             csv_escape(dep.from_id.as_str()),
             csv_escape(dep.to_id.as_str()),
             kind,
-            level
+            dep.level.as_str()
         )
         .map_err(Error::Io)?;
     }
@@ -235,7 +232,7 @@ fn write_graphml(snapshot: &Snapshot, path: &Path) -> Result<()> {
             xml_escape(dep.id.as_str()),
             xml_escape(dep.from_id.as_str()),
             xml_escape(dep.to_id.as_str()),
-            xml_escape(kind)
+            xml_escape(kind.as_ref())
         )
         .map_err(Error::Io)?;
     }
@@ -243,14 +240,12 @@ fn write_graphml(snapshot: &Snapshot, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn dep_kind_label(kind: &simplineage_core::model::graph::DependencyKind) -> &str {
+fn dep_kind_label(
+    kind: &simplineage_core::model::graph::DependencyKind,
+) -> std::borrow::Cow<'_, str> {
     match kind {
-        simplineage_core::model::graph::DependencyKind::ViewDefinition => "view_definition",
-        simplineage_core::model::graph::DependencyKind::Pipeline => "pipeline",
-        simplineage_core::model::graph::DependencyKind::ForeignKey => "foreign_key",
-        simplineage_core::model::graph::DependencyKind::Manual => "manual",
-        simplineage_core::model::graph::DependencyKind::Inferred => "inferred",
-        simplineage_core::model::graph::DependencyKind::Other(s) => s.as_str(),
+        simplineage_core::model::graph::DependencyKind::Other(s) => s.as_str().into(),
+        other => other.as_str(),
     }
 }
 

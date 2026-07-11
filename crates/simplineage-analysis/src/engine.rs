@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 
 use simplineage_core::model::Validate;
-use simplineage_core::model::objects::MetadataObject;
 use simplineage_core::model::types::DataType;
 use simplineage_core::{ObjectId, Snapshot};
 
@@ -87,8 +86,8 @@ impl AnalysisEngine {
     /// Impact analysis for a single object.
     pub fn impact(&self, id: &ObjectId, opts: &ImpactOptions) -> Result<ImpactReport> {
         if !self.graph.contains(id) {
-            // Allow subjects that exist only in snapshot catalog
-            if self.snapshot.object_index().contains_key(id) {
+            // Allow subjects that exist only in snapshot catalog (use cached kinds).
+            if self.kinds.contains_key(id) {
                 return Ok(ImpactReport {
                     subject: id.clone(),
                     direction: opts.direction,
@@ -146,7 +145,6 @@ impl AnalysisEngine {
     #[must_use]
     pub fn validate_dependencies(&self) -> DependencyValidationReport {
         let mut issues = Vec::new();
-        let catalog = self.snapshot.object_index();
         let edges_checked = self.snapshot.dependencies.len();
 
         // Snapshot structural validation
@@ -160,7 +158,7 @@ impl AnalysisEngine {
         }
 
         for dep in &self.snapshot.dependencies {
-            if !catalog.contains_key(&dep.from_id) && !self.graph.contains(&dep.from_id) {
+            if !self.kinds.contains_key(&dep.from_id) && !self.graph.contains(&dep.from_id) {
                 issues.push(ValidationIssue {
                     severity: Severity::Error,
                     code: "missing_upstream".into(),
@@ -171,7 +169,7 @@ impl AnalysisEngine {
                     objects: vec![dep.id.clone(), dep.from_id.clone()],
                 });
             }
-            if !catalog.contains_key(&dep.to_id) && !self.graph.contains(&dep.to_id) {
+            if !self.kinds.contains_key(&dep.to_id) && !self.graph.contains(&dep.to_id) {
                 issues.push(ValidationIssue {
                     severity: Severity::Error,
                     code: "missing_downstream".into(),
@@ -273,11 +271,11 @@ impl AnalysisEngine {
         }
         // Also flag catalog objects never inserted into the graph at all
         if kind == IsolationKind::Orphan {
-            for (id, obj) in self.snapshot.object_index() {
-                if !self.graph.contains(&id) {
+            for (id, kind_name) in &self.kinds {
+                if !self.graph.contains(id) {
                     out.push(IsolatedObject {
-                        id,
-                        kind: Some(obj.kind_name().to_string()),
+                        id: id.clone(),
+                        kind: Some((*kind_name).to_string()),
                         isolation: IsolationKind::Orphan,
                     });
                 }
@@ -443,7 +441,6 @@ impl AnalysisEngine {
     #[must_use]
     pub fn quality_checks(&self) -> QualityReport {
         let mut checks = Vec::new();
-        let idx = self.snapshot.object_index();
 
         // 1. Snapshot structural validity
         let snap_ok = self.snapshot.validate().is_ok();
@@ -461,19 +458,42 @@ impl AnalysisEngine {
             },
         });
 
-        // 2. Missing descriptions on relations
+        // 2. Missing descriptions on relations (iterate fields — no full object_index clone)
         let mut missing_desc = Vec::new();
-        for (id, obj) in &idx {
-            if matches!(
-                obj.kind_name(),
-                "table" | "view" | "materialized_view" | "schema"
-            ) && obj
-                .meta()
+        for t in &self.snapshot.tables {
+            if t.meta
                 .description
                 .as_ref()
                 .is_none_or(|d| d.trim().is_empty())
             {
-                missing_desc.push(id.clone());
+                missing_desc.push(t.meta.id.clone());
+            }
+        }
+        for v in &self.snapshot.views {
+            if v.meta
+                .description
+                .as_ref()
+                .is_none_or(|d| d.trim().is_empty())
+            {
+                missing_desc.push(v.meta.id.clone());
+            }
+        }
+        for m in &self.snapshot.materialized_views {
+            if m.meta
+                .description
+                .as_ref()
+                .is_none_or(|d| d.trim().is_empty())
+            {
+                missing_desc.push(m.meta.id.clone());
+            }
+        }
+        for s in &self.snapshot.schemas {
+            if s.meta
+                .description
+                .as_ref()
+                .is_none_or(|d| d.trim().is_empty())
+            {
+                missing_desc.push(s.meta.id.clone());
             }
         }
         checks.push(sample_check(
@@ -627,15 +647,8 @@ impl AnalysisEngine {
 }
 
 fn build_kind_index(snapshot: &Snapshot) -> HashMap<ObjectId, &'static str> {
-    snapshot
-        .object_index()
-        .into_iter()
-        .map(|(id, obj)| (id, kind_static(&obj)))
-        .collect()
-}
-
-fn kind_static(obj: &MetadataObject) -> &'static str {
-    obj.kind_name()
+    // Cheap path: no MetadataObject clones.
+    snapshot.kind_index().into_iter().collect()
 }
 
 fn sample_check(

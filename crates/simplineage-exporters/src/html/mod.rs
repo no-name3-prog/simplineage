@@ -349,10 +349,7 @@ pub fn write_html_report(snapshot: &Snapshot, path: &Path) -> Result<()> {
 }
 
 fn is_relation_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "table" | "view" | "materialized_view" | "unknown"
-    )
+    matches!(kind, "table" | "view" | "materialized_view" | "unknown")
 }
 
 fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: &[ReportEdge]) {
@@ -382,8 +379,14 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
             if e.level == "column" {
                 return false;
             }
-            let fk = nodes.get(&e.from).map(|n| n.kind.as_str()).unwrap_or("unknown");
-            let tk = nodes.get(&e.to).map(|n| n.kind.as_str()).unwrap_or("unknown");
+            let fk = nodes
+                .get(&e.from)
+                .map(|n| n.kind.as_str())
+                .unwrap_or("unknown");
+            let tk = nodes
+                .get(&e.to)
+                .map(|n| n.kind.as_str())
+                .unwrap_or("unknown");
             is_relation_kind(fk) && is_relation_kind(tk)
         })
         .collect();
@@ -850,7 +853,10 @@ mod tests {
             .collect();
         let span = rel_ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
             - rel_ys.iter().cloned().fold(f64::INFINITY, f64::min);
-        assert!(span < 200.0, "relation y-span should stay compact, got {span}");
+        assert!(
+            span < 200.0,
+            "relation y-span should stay compact, got {span}"
+        );
     }
 
     #[test]

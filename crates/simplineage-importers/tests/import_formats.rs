@@ -391,6 +391,14 @@ fn column_level_deps_resolve_endpoints() {
         .iter()
         .find(|d| d.level == simplineage_core::model::graph::DependencyLevel::Column)
         .expect("column dep");
-    assert!(col_dep.from_id.as_str().contains("email"), "{}", col_dep.from_id);
-    assert!(col_dep.to_id.as_str().contains("email"), "{}", col_dep.to_id);
+    assert!(
+        col_dep.from_id.as_str().contains("email"),
+        "{}",
+        col_dep.from_id
+    );
+    assert!(
+        col_dep.to_id.as_str().contains("email"),
+        "{}",
+        col_dep.to_id
+    );
 }

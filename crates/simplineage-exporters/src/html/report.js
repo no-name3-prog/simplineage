@@ -275,12 +275,20 @@
       path.dataset.to = e.to;
       path.dataset.id = e.id;
       path.setAttribute("marker-end", "url(#arrow)");
+      // Node box is 160×44; attach to midpoints of facing sides.
       const x1 = a.x + 160;
       const y1 = a.y + 22;
       const x2 = b.x;
       const y2 = b.y + 22;
-      const mx = (x1 + x2) / 2;
-      path.setAttribute("d", "M " + x1 + " " + y1 + " C " + mx + " " + y1 + ", " + mx + " " + y2 + ", " + x2 + " " + y2);
+      const dx = Math.max(24, Math.abs(x2 - x1));
+      // Cap horizontal pull so steep edges do not bow into huge S-curves.
+      const pull = Math.min(80, dx * 0.45);
+      const c1x = x1 + pull;
+      const c2x = x2 - pull;
+      path.setAttribute(
+        "d",
+        "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2
+      );
       edgesG.appendChild(path);
     });
 

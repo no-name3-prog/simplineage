@@ -55,6 +55,14 @@ fn demo(snap: &Snapshot) {
 }
 ```
 
+## Layout
+
+The offline report lays out **tables / views first** (relation-level edges only),
+with each layer vertically centered so strips line up. **Columns** are nested
+under their parent relation (`parent_id`), not mixed into the main vertical pack.
+That keeps the default *Relations only* view compact even when the snapshot has
+hundreds of columns.
+
 ## Limitations
 
 - Very large graphs (thousands of nodes) remain usable with filters, but the

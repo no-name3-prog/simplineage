@@ -178,20 +178,17 @@ pub fn intermediate_to_snapshot(
     for d in &cat.dependencies {
         let from_schema = d.from_schema.as_deref().unwrap_or(default_schema.as_str());
         let to_schema = d.to_schema.as_deref().unwrap_or(default_schema.as_str());
+        let from_col = nonempty_col(d.from_column.as_deref());
+        let to_col = nonempty_col(d.to_column.as_deref());
         let (from_id, level_a) = resolve_endpoint(
             &relations,
             &columns_idx,
             from_schema,
             &d.from_table,
-            d.from_column.as_deref(),
+            from_col,
         )?;
-        let (to_id, level_b) = resolve_endpoint(
-            &relations,
-            &columns_idx,
-            to_schema,
-            &d.to_table,
-            d.to_column.as_deref(),
-        )?;
+        let (to_id, level_b) =
+            resolve_endpoint(&relations, &columns_idx, to_schema, &d.to_table, to_col)?;
         let level = if matches!(level_a, DependencyLevel::Column)
             || matches!(level_b, DependencyLevel::Column)
         {
@@ -199,11 +196,28 @@ pub fn intermediate_to_snapshot(
         } else {
             DependencyLevel::Relation
         };
-        snap.dependencies.push(Dependency {
-            id: ObjectId::from_trusted(format!(
+        // Include column endpoints in the id so multi-column edges between the
+        // same tables do not collide (validation requires unique dependency ids).
+        let id = match (from_col, to_col) {
+            (Some(fc), Some(tc)) => format!(
+                "dep:{from_schema}:{}.{fc}->{to_schema}:{}.{tc}",
+                d.from_table, d.to_table
+            ),
+            (Some(fc), None) => format!(
+                "dep:{from_schema}:{}.{fc}->{to_schema}:{}",
+                d.from_table, d.to_table
+            ),
+            (None, Some(tc)) => format!(
+                "dep:{from_schema}:{}->{to_schema}:{}.{tc}",
+                d.from_table, d.to_table
+            ),
+            (None, None) => format!(
                 "dep:{from_schema}:{}->{to_schema}:{}",
                 d.from_table, d.to_table
-            )),
+            ),
+        };
+        snap.dependencies.push(Dependency {
+            id: ObjectId::from_trusted(id),
             from_id,
             to_id,
             kind: parse_dep_kind(d.kind.as_deref()),
@@ -562,6 +576,10 @@ fn find_relation_key(
         .cloned()
 }
 
+fn nonempty_col(col: Option<&str>) -> Option<&str> {
+    col.map(str::trim).filter(|c| !c.is_empty())
+}
+
 fn resolve_endpoint(
     relations: &BTreeMap<String, (ObjectId, String)>,
     columns: &BTreeMap<String, ObjectId>,
@@ -569,7 +587,7 @@ fn resolve_endpoint(
     table: &str,
     column: Option<&str>,
 ) -> Result<(ObjectId, DependencyLevel)> {
-    if let Some(col) = column {
+    if let Some(col) = nonempty_col(column) {
         if let Some(key) = find_relation_key(relations, schema, table) {
             let ck = format!("{key}.{col}");
             if let Some(id) = columns.get(&ck) {

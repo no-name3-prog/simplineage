@@ -30,12 +30,21 @@
 
   const RELATION_KINDS = new Set(["table", "view", "materialized_view", "unknown"]);
 
-  // Build adjacency
+  // Build adjacency + parent → child columns index
   const outs = new Map();
   const ins = new Map();
+  /** @type {Map<string, any[]>} */
+  const childrenByParent = new Map();
   (DATA.nodes || []).forEach((n) => {
     outs.set(n.id, []);
     ins.set(n.id, []);
+    if (n.parent_id) {
+      if (!childrenByParent.has(n.parent_id)) childrenByParent.set(n.parent_id, []);
+      childrenByParent.get(n.parent_id).push(n);
+    }
+  });
+  childrenByParent.forEach((cols) => {
+    cols.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   });
   (DATA.edges || []).forEach((e) => {
     if (!outs.has(e.from)) outs.set(e.from, []);
@@ -43,6 +52,11 @@
     outs.get(e.from).push(e.to);
     ins.get(e.to).push(e.from);
   });
+
+  function nodeBox(n) {
+    if (n && n.kind === "column") return { w: 148, h: 36 };
+    return { w: 160, h: 44 };
+  }
 
   function initChrome() {
     const sub = document.getElementById("report-subtitle");
@@ -157,13 +171,23 @@
     return (DATA.nodes || []).find((n) => n.id === id);
   }
 
-  function isVisibleNode(n) {
+  /**
+   * Visibility with optional focus reveal: when "Relations only" is on, column
+   * nodes stay hidden unless they participate in the current impact/search focus.
+   * @param {any} n
+   * @param {{ active: boolean, isFocused: (id: string) => boolean } | null} focus
+   */
+  function isVisibleNode(n, focus) {
+    if (!n) return false;
     if (!state.kinds.has(n.kind)) return false;
-    if (state.relationsOnly && !RELATION_KINDS.has(n.kind) && n.kind !== "unknown") return false;
     if (state.hideIsolated) {
       const o = (outs.get(n.id) || []).length;
       const i = (ins.get(n.id) || []).length;
       if (o + i === 0) return false;
+    }
+    if (state.relationsOnly && !RELATION_KINDS.has(n.kind) && n.kind !== "unknown") {
+      if (focus && focus.active && focus.isFocused(n.id)) return true;
+      return false;
     }
     return true;
   }
@@ -402,17 +426,19 @@
   }
 
   function fitView() {
-    const visible = (DATA.nodes || []).filter(isVisibleNode);
+    const focus = computeFocus();
+    const visible = (DATA.nodes || []).filter((n) => isVisibleNode(n, focus));
     if (!visible.length) return;
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
       maxY = -Infinity;
     visible.forEach((n) => {
+      const box = nodeBox(n);
       minX = Math.min(minX, n.x);
       minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + 160);
-      maxY = Math.max(maxY, n.y + 44);
+      maxX = Math.max(maxX, n.x + box.w);
+      maxY = Math.max(maxY, n.y + box.h);
     });
     const rect = svg.getBoundingClientRect();
     const pad = 40;
@@ -442,14 +468,15 @@
       path.dataset.from = e.from;
       path.dataset.to = e.to;
       path.dataset.id = e.id;
+      if (e.level) path.dataset.level = e.level;
       path.setAttribute("marker-end", "url(#arrow)");
-      // Node box is 160×44; attach to midpoints of facing sides.
-      const x1 = a.x + 160;
-      const y1 = a.y + 22;
+      const ab = nodeBox(a);
+      const bb = nodeBox(b);
+      const x1 = a.x + ab.w;
+      const y1 = a.y + ab.h / 2;
       const x2 = b.x;
-      const y2 = b.y + 22;
+      const y2 = b.y + bb.h / 2;
       const dx = Math.max(24, Math.abs(x2 - x1));
-      // Cap horizontal pull so steep edges do not bow into huge S-curves.
       const pull = Math.min(80, dx * 0.45);
       const c1x = x1 + pull;
       const c2x = x2 - pull;
@@ -457,6 +484,7 @@
         "d",
         "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2
       );
+      if (e.level === "column") path.classList.add("edge-column");
       edgesG.appendChild(path);
     });
 
@@ -466,23 +494,25 @@
       g.dataset.id = n.id;
       g.setAttribute("transform", "translate(" + n.x + "," + n.y + ")");
 
+      const box = nodeBox(n);
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("width", "160");
-      rect.setAttribute("height", "44");
-      rect.setAttribute("rx", "8");
-      rect.setAttribute("ry", "8");
+      rect.setAttribute("width", String(box.w));
+      rect.setAttribute("height", String(box.h));
+      rect.setAttribute("rx", n.kind === "column" ? "6" : "8");
+      rect.setAttribute("ry", n.kind === "column" ? "6" : "8");
 
       const kind = document.createElementNS("http://www.w3.org/2000/svg", "text");
       kind.setAttribute("class", "kind-label");
       kind.setAttribute("x", "10");
-      kind.setAttribute("y", "14");
+      kind.setAttribute("y", n.kind === "column" ? "12" : "14");
       kind.textContent = n.kind || "";
 
       const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
       label.setAttribute("x", "10");
-      label.setAttribute("y", "32");
+      label.setAttribute("y", n.kind === "column" ? "26" : "32");
       const text = n.name || n.id;
-      label.textContent = text.length > 22 ? text.slice(0, 20) + "…" : text;
+      const maxLen = n.kind === "column" ? 20 : 22;
+      label.textContent = text.length > maxLen ? text.slice(0, maxLen - 1) + "…" : text;
 
       g.appendChild(rect);
       g.appendChild(kind);
@@ -499,11 +529,11 @@
   }
 
   function applyVisibility() {
+    const focus = computeFocus();
     const visibleIds = new Set();
     (DATA.nodes || []).forEach((n) => {
-      if (isVisibleNode(n)) visibleIds.add(n.id);
+      if (isVisibleNode(n, focus)) visibleIds.add(n.id);
     });
-    const focus = computeFocus();
 
     nodesG.querySelectorAll(".node").forEach((el) => {
       const n = nodeById(el.dataset.id);
@@ -551,6 +581,10 @@
   function fillDetailPanel(n) {
     const empty = document.getElementById("detail-empty");
     const body = document.getElementById("detail-body");
+    const dtypeEl = document.getElementById("d-dtype");
+    const parentEl = document.getElementById("d-parent");
+    const colsHeading = document.getElementById("d-columns-heading");
+    const colsEl = document.getElementById("d-columns");
     if (!n) {
       empty.classList.remove("hidden");
       body.classList.add("hidden");
@@ -564,6 +598,63 @@
     document.getElementById("d-id").textContent = n.id;
     document.getElementById("d-desc").textContent = n.description || "No description.";
 
+    // Column data type / parent relation
+    if (dtypeEl) {
+      if (n.data_type) {
+        dtypeEl.textContent = "type: " + n.data_type;
+        dtypeEl.classList.remove("hidden");
+      } else {
+        dtypeEl.textContent = "";
+        dtypeEl.classList.add("hidden");
+      }
+    }
+    if (parentEl) {
+      if (n.parent_id) {
+        const p = nodeById(n.parent_id);
+        parentEl.textContent =
+          "parent: " + ((p && (p.fqn || p.name)) || n.parent_id);
+        parentEl.classList.remove("hidden");
+        parentEl.style.cursor = "pointer";
+        parentEl.onclick = () => selectNode(n.parent_id);
+      } else {
+        parentEl.textContent = "";
+        parentEl.classList.add("hidden");
+        parentEl.onclick = null;
+      }
+    }
+
+    // Child columns list (table / view / MV) — click focuses column lineage
+    const childCols = childrenByParent.get(n.id) || [];
+    if (colsHeading && colsEl) {
+      if (childCols.length) {
+        colsHeading.classList.remove("hidden");
+        colsEl.classList.remove("hidden");
+        colsHeading.textContent = "Columns (" + childCols.length + ")";
+        colsEl.innerHTML = childCols
+          .map((c) => {
+            const typeBit = c.data_type
+              ? " <span class='muted mono'>" + escapeHtml(c.data_type) + "</span>"
+              : "";
+            return (
+              "<div class='chip col-chip' data-id='" +
+              escapeAttr(c.id) +
+              "' title='Focus column lineage'>· " +
+              escapeHtml(c.name || c.id) +
+              typeBit +
+              "</div>"
+            );
+          })
+          .join("");
+        colsEl.querySelectorAll(".chip").forEach((el) => {
+          el.addEventListener("click", () => selectNode(el.dataset.id));
+        });
+      } else {
+        colsHeading.classList.add("hidden");
+        colsEl.classList.add("hidden");
+        colsEl.innerHTML = "";
+      }
+    }
+
     const neigh = document.getElementById("d-neighbors");
     const up = ins.get(n.id) || [];
     const down = outs.get(n.id) || [];
@@ -572,11 +663,12 @@
       html += "<div class='muted'>Upstream (" + up.length + ")</div>";
       up.forEach((u) => {
         const nn = nodeById(u);
+        const kind = nn && nn.kind ? "[" + nn.kind + "] " : "";
         html +=
           "<div class='chip' data-id='" +
           escapeAttr(u) +
           "'>↑ " +
-          escapeHtml((nn && (nn.fqn || nn.name)) || u) +
+          escapeHtml(kind + ((nn && (nn.fqn || nn.name)) || u)) +
           "</div>";
       });
     }
@@ -584,11 +676,12 @@
       html += "<div class='muted' style='margin-top:0.5rem'>Downstream (" + down.length + ")</div>";
       down.forEach((u) => {
         const nn = nodeById(u);
+        const kind = nn && nn.kind ? "[" + nn.kind + "] " : "";
         html +=
           "<div class='chip' data-id='" +
           escapeAttr(u) +
           "'>↓ " +
-          escapeHtml((nn && (nn.fqn || nn.name)) || u) +
+          escapeHtml(kind + ((nn && (nn.fqn || nn.name)) || u)) +
           "</div>";
       });
     }
@@ -662,7 +755,8 @@
 
   function exportMermaid() {
     const lines = ["flowchart LR"];
-    const visible = (DATA.nodes || []).filter(isVisibleNode);
+    const focus = computeFocus();
+    const visible = (DATA.nodes || []).filter((n) => isVisibleNode(n, focus));
     const ids = new Set(visible.map((n) => n.id));
     const safe = (id) => "n_" + id.replace(/[^a-zA-Z0-9_]/g, "_");
     visible.forEach((n) => {

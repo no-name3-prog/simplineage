@@ -176,8 +176,19 @@ marker#arrow path { fill: var(--edge); }
 .kind-table rect { stroke: #0284c7; }
 .kind-view rect { stroke: #7c3aed; }
 .kind-materialized_view rect { stroke: #db2777; }
-.kind-column rect { stroke: #64748b; }
+.kind-column rect {
+  stroke: #64748b;
+  fill: color-mix(in srgb, var(--node-fill) 88%, #94a3b8 12%);
+}
+.kind-column text { font-size: 11px; }
+.kind-column .kind-label { font-size: 8px; }
 .kind-schema rect, .kind-database rect, .kind-catalog rect { stroke: #0d9488; }
+
+.edge.edge-column { stroke-dasharray: 4 3; opacity: 0.9; }
+
+#d-columns { font-size: 0.85rem; margin-bottom: 0.5rem; max-height: 12rem; overflow: auto; }
+#d-columns .col-chip { padding-left: 0.15rem; }
+#d-parent:hover { color: var(--accent); }
 
 .footer {
   padding: 0.35rem 1rem; font-size: 0.75rem;

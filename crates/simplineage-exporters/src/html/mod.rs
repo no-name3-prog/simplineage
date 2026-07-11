@@ -79,6 +79,12 @@ pub struct ReportNode {
     pub fqn: String,
     /// Optional description.
     pub description: Option<String>,
+    /// Parent relation id for columns (enables table → column panel UX).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Short data-type label for columns when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_type: Option<String>,
     /// Layout layer (0 = sources).
     pub layer: usize,
     /// Suggested x coordinate (layout units).
@@ -118,16 +124,33 @@ fn build_report_data_inner(snapshot: &Snapshot, layout: bool) -> ReportData {
     let index = snapshot.object_index();
     let mut nodes_map: BTreeMap<String, ReportNode> = BTreeMap::new();
 
+    // Column extras keyed by object id.
+    let mut column_meta: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
+    for c in &snapshot.columns {
+        let dtype = c
+            .raw_type
+            .clone()
+            .or_else(|| Some(data_type_label(&c.data_type)));
+        column_meta.insert(c.meta.id.to_string(), (c.parent_id.to_string(), dtype));
+    }
+
     for (id, obj) in &index {
         let meta = obj.meta();
+        let key = id.as_str().to_string();
+        let (parent_id, data_type) = column_meta
+            .get(&key)
+            .map(|(p, d)| (Some(p.clone()), d.clone()))
+            .unwrap_or((None, None));
         nodes_map.insert(
-            id.as_str().to_string(),
+            key,
             ReportNode {
                 id: id.to_string(),
                 kind: obj.kind_name().to_string(),
                 name: meta.name.clone(),
                 fqn: meta.fqn.to_dotted(),
                 description: meta.description.clone(),
+                parent_id,
+                data_type,
                 layer: 0,
                 x: 0.0,
                 y: 0.0,
@@ -144,6 +167,8 @@ fn build_report_data_inner(snapshot: &Snapshot, layout: bool) -> ReportData {
                 name: leaf_name(&key),
                 fqn: key,
                 description: None,
+                parent_id: None,
+                data_type: None,
                 layer: 0,
                 x: 0.0,
                 y: 0.0,
@@ -247,8 +272,9 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
         <div class="filter-group" id="kind-filters"></div>
         <label class="check"><input type="checkbox" id="hide-isolated"/> Hide isolated</label>
         <label class="check"><input type="checkbox" id="relations-only" checked/> Relations only</label>
+        <p class="hint">Uncheck <em>Relations only</em> to plot column nodes. Selecting a column (or a column in Details) still focuses field-level lineage while relations-only is on.</p>
         <h2>Impact</h2>
-        <p class="hint">Click a node to auto-highlight its upstream and downstream (others dim). Search does the same for matches. Narrow with Upstream / Downstream / Both.</p>
+        <p class="hint">Click a node to auto-highlight its upstream and downstream (others dim). Search does the same for matches — column hits reveal column paths. Narrow with Upstream / Downstream / Both.</p>
         <div class="btn-row">
           <button type="button" id="btn-up" class="btn" disabled>Upstream</button>
           <button type="button" id="btn-down" class="btn" disabled>Downstream</button>
@@ -271,7 +297,7 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
             <g id="nodes"></g>
           </g>
         </svg>
-        <div class="canvas-hint muted">Scroll to zoom · drag to pan · click a node to focus lineage · click empty canvas to clear</div>
+        <div class="canvas-hint muted">Scroll to zoom · drag to pan · click a node (table or column) to focus lineage · click empty canvas to clear</div>
       </section>
       <aside class="sidebar right" id="detail-panel">
         <h2>Details</h2>
@@ -282,6 +308,10 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
           <p class="mono" id="d-fqn"></p>
           <p class="mono muted" id="d-id"></p>
           <p id="d-desc" class="desc"></p>
+          <p id="d-dtype" class="mono muted hidden"></p>
+          <p id="d-parent" class="mono muted hidden"></p>
+          <h3 id="d-columns-heading" class="hidden">Columns</h3>
+          <div id="d-columns" class="hidden"></div>
           <h3>Neighbors</h3>
           <div id="d-neighbors"></div>
         </div>
@@ -318,26 +348,76 @@ pub fn write_html_report(snapshot: &Snapshot, path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn is_relation_kind(kind: &str) -> bool {
+    matches!(kind, "table" | "view" | "materialized_view" | "unknown")
+}
+
 fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: &[ReportEdge]) {
-    // Only nodes that participate in lineage edges drive the main layered layout.
-    // Catalog/schema/column-only objects used to pack into layer 0 and push real
-    // sources thousands of pixels down, producing huge vertical edges.
-    let mut connected: BTreeSet<String> = BTreeSet::new();
-    for e in edges {
-        connected.insert(e.from.clone());
-        connected.insert(e.to.clone());
+    // ── Primary layout: relations only (table / view / MV) ───────────────
+    //
+    // Mixing hundreds of column nodes into the same layered pack used to make
+    // tables sit thousands of pixels apart (columns took vertical slots). When
+    // the HTML "Relations only" filter hides columns, those gaps remain — the
+    // graph looks sparse, misaligned, and "lower nodes very low".
+    //
+    // Fix: layer + pack **relation-level** structure first; nest columns next
+    // to their parent table via `parent_id`.
+
+    const X_GAP: f64 = 220.0;
+    const Y_GAP: f64 = 72.0;
+    const X0: f64 = 40.0;
+    const Y0: f64 = 40.0;
+    const NODE_H: f64 = 44.0;
+    const COL_X_OFFSET: f64 = 18.0;
+    const COL_Y_GAP: f64 = 40.0;
+    const COL_STACK_MAX: usize = 12; // wrap extra columns into a second stack
+
+    // Relation-level edges (and any edge whose endpoints are both relations).
+    let primary_edges: Vec<&ReportEdge> = edges
+        .iter()
+        .filter(|e| {
+            if e.level == "column" {
+                return false;
+            }
+            let fk = nodes
+                .get(&e.from)
+                .map(|n| n.kind.as_str())
+                .unwrap_or("unknown");
+            let tk = nodes
+                .get(&e.to)
+                .map(|n| n.kind.as_str())
+                .unwrap_or("unknown");
+            is_relation_kind(fk) && is_relation_kind(tk)
+        })
+        .collect();
+
+    let mut primary: BTreeSet<String> = BTreeSet::new();
+    for e in &primary_edges {
+        primary.insert(e.from.clone());
+        primary.insert(e.to.clone());
+    }
+    // Include relation nodes even if only column edges touch them (still place
+    // them as free roots in layer 0 so parents exist for column nesting).
+    for (id, n) in nodes.iter() {
+        if is_relation_kind(&n.kind) {
+            // Prefer nodes that appear on any edge, else leave for isolated grid.
+            let on_edge = edges.iter().any(|e| e.from == *id || e.to == *id);
+            if on_edge {
+                primary.insert(id.clone());
+            }
+        }
     }
 
     let mut outs: HashMap<String, Vec<String>> = HashMap::new();
     let mut ins: HashMap<String, Vec<String>> = HashMap::new();
     let mut indeg: HashMap<String, usize> = HashMap::new();
-    for id in &connected {
+    for id in &primary {
         indeg.entry(id.clone()).or_insert(0);
         outs.entry(id.clone()).or_default();
         ins.entry(id.clone()).or_default();
     }
-    for e in edges {
-        if !connected.contains(&e.from) || !connected.contains(&e.to) {
+    for e in &primary_edges {
+        if !primary.contains(&e.from) || !primary.contains(&e.to) {
             continue;
         }
         outs.entry(e.from.clone()).or_default().push(e.to.clone());
@@ -348,13 +428,12 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
 
     let mut layer: HashMap<String, usize> = HashMap::new();
     let mut q: VecDeque<String> = VecDeque::new();
-    for id in &connected {
+    for id in &primary {
         if *indeg.get(id).unwrap_or(&0) == 0 {
             q.push_back(id.clone());
             layer.insert(id.clone(), 0);
         }
     }
-    // Kahn-like with longest path (sources = layer 0).
     let mut remaining = indeg.clone();
     let mut seen = BTreeSet::new();
     while let Some(u) = q.pop_front() {
@@ -376,11 +455,10 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
             }
         }
     }
-    for id in &connected {
+    for id in &primary {
         layer.entry(id.clone()).or_insert(0);
     }
 
-    // Bucket connected nodes by layer.
     let mut by_layer: BTreeMap<usize, Vec<String>> = BTreeMap::new();
     for (id, l) in &layer {
         by_layer.entry(*l).or_default().push(id.clone());
@@ -389,8 +467,7 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
         ids.sort();
     }
 
-    // Barycenter ordering: keep nodes near their neighbors to shorten edges.
-    // Use rank maps keyed by &str borrowed from owned id strings in by_layer.
+    // Barycenter ordering on the primary (relation) graph only.
     const ORDER_PASSES: usize = 6;
     for _ in 0..ORDER_PASSES {
         let layers: Vec<usize> = by_layer.keys().copied().collect();
@@ -434,39 +511,89 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
         }
     }
 
-    // Compact horizontal/vertical gaps for readable edges (node width ≈ 160).
-    const X_GAP: f64 = 200.0;
-    const Y_GAP: f64 = 64.0;
-    const X0: f64 = 40.0;
-    const Y0: f64 = 40.0;
-    const NODE_H: f64 = 44.0;
-
+    // Compact pack: each layer is a vertical strip. Shorter layers are
+    // vertically centered against the tallest layer so cross-layer edges
+    // don't all dive toward the top-left.
     let mut max_y = Y0;
+    let mut placed: BTreeSet<String> = BTreeSet::new();
+    let max_layer_len = by_layer.values().map(Vec::len).max().unwrap_or(1);
+    let max_band = (max_layer_len.saturating_sub(1) as f64) * Y_GAP;
     for (l, ids) in &by_layer {
+        let band = (ids.len().saturating_sub(1) as f64) * Y_GAP;
+        let y_center = (max_band - band) / 2.0;
         for (i, id) in ids.iter().enumerate() {
             if let Some(n) = nodes.get_mut(id) {
                 n.layer = *l;
                 n.x = X0 + (*l as f64) * X_GAP;
-                n.y = Y0 + (i as f64) * Y_GAP;
+                n.y = Y0 + y_center + (i as f64) * Y_GAP;
                 max_y = max_y.max(n.y + NODE_H);
+                placed.insert(id.clone());
             }
         }
     }
 
-    // Isolated catalog objects (columns, schemas, …) sit below the lineage
-    // graph in a dense grid so they never stretch primary edges.
+    // ── Columns: nest under parent relation ──────────────────────────────
+    let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut orphan_columns: Vec<String> = Vec::new();
+    for (id, n) in nodes.iter() {
+        if n.kind != "column" {
+            continue;
+        }
+        if let Some(p) = n.parent_id.as_ref() {
+            if nodes.contains_key(p) {
+                children.entry(p.clone()).or_default().push(id.clone());
+                continue;
+            }
+        }
+        orphan_columns.push(id.clone());
+    }
+    for kids in children.values_mut() {
+        kids.sort_by(|a, b| {
+            let na = nodes.get(a).map(|n| n.name.as_str()).unwrap_or("");
+            let nb = nodes.get(b).map(|n| n.name.as_str()).unwrap_or("");
+            na.cmp(nb).then_with(|| a.cmp(b))
+        });
+    }
+
+    for (parent_id, kids) in &children {
+        let (px, py, player) = match nodes.get(parent_id) {
+            Some(p) if placed.contains(parent_id) => (p.x, p.y, p.layer),
+            _ => continue,
+        };
+        for (i, kid) in kids.iter().enumerate() {
+            if let Some(n) = nodes.get_mut(kid) {
+                let stack = i / COL_STACK_MAX;
+                let row = i % COL_STACK_MAX;
+                // Sit just under the parent, slight right offset per stack wrap.
+                n.layer = player;
+                n.x = px + COL_X_OFFSET + (stack as f64) * 150.0;
+                n.y = py + NODE_H + 8.0 + (row as f64) * COL_Y_GAP;
+                max_y = max_y.max(n.y + 36.0);
+                placed.insert(kid.clone());
+            }
+        }
+    }
+
+    // ── Remaining (schemas, catalogs, orphan columns, free relations) ────
     let mut isolated: Vec<String> = nodes
         .keys()
-        .filter(|id| !connected.contains(*id))
+        .filter(|id| !placed.contains(*id))
         .cloned()
         .collect();
     isolated.sort();
+    // Prefer putting orphan columns first in the isolated grid for predictability.
+    isolated.sort_by(|a, b| {
+        let ka = nodes.get(a).map(|n| n.kind.as_str()).unwrap_or("");
+        let kb = nodes.get(b).map(|n| n.kind.as_str()).unwrap_or("");
+        let rank = |k: &str| if k == "column" { 0 } else { 1 };
+        rank(ka).cmp(&rank(kb)).then_with(|| a.cmp(b))
+    });
+    let _ = orphan_columns;
 
     const ISO_COLS: usize = 4;
     const ISO_X_GAP: f64 = 180.0;
     const ISO_Y_GAP: f64 = 56.0;
-    let iso_y0 = max_y + 80.0;
-    // Place isolated block to the right of the main graph when there are layers.
+    let iso_y0 = max_y + 100.0;
     let max_layer = by_layer.keys().next_back().copied().unwrap_or(0);
     let iso_x0 = X0 + (max_layer as f64 + 1.5) * X_GAP;
 
@@ -477,18 +604,23 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
             n.layer = 0;
             n.x = iso_x0 + (col as f64) * ISO_X_GAP;
             n.y = iso_y0 + (row as f64) * ISO_Y_GAP;
+            placed.insert(id.clone());
         }
     }
 
-    // Graphs with no edges: compact grid of all nodes.
-    if connected.is_empty() && !nodes.is_empty() {
-        let mut all: Vec<String> = nodes.keys().cloned().collect();
-        all.sort();
-        for (i, id) in all.iter().enumerate() {
+    // Graphs with no primary edges: compact grid of relation nodes, columns nested.
+    if primary_edges.is_empty() && by_layer.is_empty() {
+        let mut rels: Vec<String> = nodes
+            .iter()
+            .filter(|(_, n)| is_relation_kind(&n.kind))
+            .map(|(id, _)| id.clone())
+            .collect();
+        rels.sort();
+        for (i, id) in rels.iter().enumerate() {
             if let Some(n) = nodes.get_mut(id) {
                 let col = i % 6;
                 let row = i / 6;
-                n.layer = 0;
+                n.layer = col;
                 n.x = X0 + (col as f64) * X_GAP;
                 n.y = Y0 + (row as f64) * Y_GAP;
             }
@@ -524,6 +656,41 @@ fn leaf_name(s: &str) -> String {
     s.rsplit(['.', '/', ':']).next().unwrap_or(s).to_string()
 }
 
+fn data_type_label(dt: &simplineage_core::model::types::DataType) -> String {
+    use simplineage_core::model::types::DataType;
+    match dt {
+        DataType::Boolean => "boolean".into(),
+        DataType::Integer { bits } => bits
+            .map(|b| format!("integer({b})"))
+            .unwrap_or_else(|| "integer".into()),
+        DataType::Decimal { precision, scale } => match (precision, scale) {
+            (Some(p), Some(s)) => format!("decimal({p},{s})"),
+            (Some(p), None) => format!("decimal({p})"),
+            _ => "decimal".into(),
+        },
+        DataType::Float { bits } => bits
+            .map(|b| format!("float({b})"))
+            .unwrap_or_else(|| "float".into()),
+        DataType::String { max_length, .. } => max_length
+            .map(|n| format!("string({n})"))
+            .unwrap_or_else(|| "string".into()),
+        DataType::Binary { max_length } => max_length
+            .map(|n| format!("binary({n})"))
+            .unwrap_or_else(|| "binary".into()),
+        DataType::Date => "date".into(),
+        DataType::Time { .. } => "time".into(),
+        DataType::Timestamp { .. } => "timestamp".into(),
+        DataType::Json => "json".into(),
+        DataType::Array { .. } => "array".into(),
+        DataType::Map { .. } => "map".into(),
+        DataType::Struct { .. } => "struct".into(),
+        DataType::Spatial => "spatial".into(),
+        DataType::Uuid => "uuid".into(),
+        DataType::Other { name } => name.clone(),
+        DataType::Unknown => "unknown".into(),
+    }
+}
+
 fn dep_kind_label(kind: &DependencyKind) -> String {
     match kind {
         // Keep short label for Other (not other: prefix) in the HTML payload.
@@ -545,7 +712,8 @@ mod tests {
     use simplineage_core::ObjectId;
     use simplineage_core::model::graph::{Dependency, DependencyKind, DependencyLevel};
     use simplineage_core::model::ids::FullyQualifiedName;
-    use simplineage_core::model::objects::{ObjectMeta, Table, View};
+    use simplineage_core::model::objects::{Column, ObjectMeta, Table, View};
+    use simplineage_core::model::types::DataType;
 
     fn sample() -> Snapshot {
         let mut s = Snapshot::new();
@@ -556,7 +724,7 @@ mod tests {
                 FullyQualifiedName::parse_dotted("raw.orders").unwrap(),
             ),
             schema_id: None,
-            column_ids: vec![],
+            column_ids: vec![ObjectId::from_trusted("column:orders.email")],
         });
         s.views.push(View {
             meta: ObjectMeta::new(
@@ -564,8 +732,38 @@ mod tests {
                 FullyQualifiedName::parse_dotted("staging.stg_orders").unwrap(),
             ),
             schema_id: None,
-            column_ids: vec![],
+            column_ids: vec![ObjectId::from_trusted("column:stg.email")],
             definition: None,
+        });
+        s.columns.push(Column {
+            meta: ObjectMeta::new(
+                ObjectId::from_trusted("column:orders.email"),
+                FullyQualifiedName::parse_dotted("raw.orders.email").unwrap(),
+            ),
+            parent_id: ObjectId::from_trusted("table:orders"),
+            ordinal: Some(0),
+            data_type: DataType::String {
+                max_length: None,
+                is_char_length: None,
+            },
+            nullable: true,
+            is_primary_key: None,
+            raw_type: Some("VARCHAR".into()),
+        });
+        s.columns.push(Column {
+            meta: ObjectMeta::new(
+                ObjectId::from_trusted("column:stg.email"),
+                FullyQualifiedName::parse_dotted("staging.stg_orders.email").unwrap(),
+            ),
+            parent_id: ObjectId::from_trusted("view:stg"),
+            ordinal: Some(0),
+            data_type: DataType::String {
+                max_length: None,
+                is_char_length: None,
+            },
+            nullable: true,
+            is_primary_key: None,
+            raw_type: None,
         });
         s.dependencies.push(Dependency {
             id: ObjectId::from_trusted("d1"),
@@ -576,25 +774,39 @@ mod tests {
             confidence: None,
             attributes: Default::default(),
         });
+        s.dependencies.push(Dependency {
+            id: ObjectId::from_trusted("d-col"),
+            from_id: ObjectId::from_trusted("column:orders.email"),
+            to_id: ObjectId::from_trusted("column:stg.email"),
+            kind: DependencyKind::ViewDefinition,
+            level: DependencyLevel::Column,
+            confidence: None,
+            attributes: Default::default(),
+        });
         s
     }
 
     #[test]
     fn builds_layers() {
         let data = build_report_data(&sample());
-        assert_eq!(data.nodes.len(), 2);
-        assert_eq!(data.edges.len(), 1);
+        assert_eq!(data.nodes.len(), 4);
+        assert_eq!(data.edges.len(), 2);
         let orders = data.nodes.iter().find(|n| n.id == "table:orders").unwrap();
         let stg = data.nodes.iter().find(|n| n.id == "view:stg").unwrap();
         assert!(stg.layer >= orders.layer);
         assert!(stg.x >= orders.x);
+        let col = data
+            .nodes
+            .iter()
+            .find(|n| n.id == "column:orders.email")
+            .unwrap();
+        assert_eq!(col.kind, "column");
+        assert_eq!(col.parent_id.as_deref(), Some("table:orders"));
+        assert_eq!(col.data_type.as_deref(), Some("VARCHAR"));
     }
 
     #[test]
     fn connected_nodes_not_pushed_by_isolated_catalog() {
-        use simplineage_core::model::objects::Column;
-        use simplineage_core::model::types::DataType;
-
         let mut s = sample();
         // Many isolated columns used to pack into layer 0 and push sources down.
         for i in 0..40 {
@@ -618,13 +830,33 @@ mod tests {
         let data = build_report_data(&s);
         let orders = data.nodes.iter().find(|n| n.id == "table:orders").unwrap();
         let stg = data.nodes.iter().find(|n| n.id == "view:stg").unwrap();
-        // Source and next layer should sit on a compact vertical band.
+        // Source and next layer should sit on a compact vertical band (relations only).
         assert!(orders.y < 200.0, "orders.y={}", orders.y);
         assert!(stg.y < 200.0, "stg.y={}", stg.y);
         assert!((orders.y - stg.y).abs() < 120.0);
-        // Isolated columns sit below / aside, not between source layers.
+        // Columns nest under their parent — not interleaved into the relation pack.
         let col = data.nodes.iter().find(|n| n.id == "column:c0").unwrap();
-        assert!(col.y > orders.y || col.x > stg.x);
+        assert!(
+            (col.x - orders.x).abs() < 200.0 && col.y >= orders.y,
+            "column should nest near parent orders: col=({}, {}) orders=({}, {})",
+            col.x,
+            col.y,
+            orders.x,
+            orders.y
+        );
+        // Relation nodes stay compact even with many child columns in the payload.
+        let rel_ys: Vec<f64> = data
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.kind.as_str(), "table" | "view"))
+            .map(|n| n.y)
+            .collect();
+        let span = rel_ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - rel_ys.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!(
+            span < 200.0,
+            "relation y-span should stay compact, got {span}"
+        );
     }
 
     #[test]
@@ -641,5 +873,10 @@ mod tests {
         assert!(html.contains("computeFocus"));
         assert!(html.contains("lineageSets"));
         assert!(html.contains("auto-highlight"));
+        // Column-level UX
+        assert!(html.contains("d-columns"));
+        assert!(html.contains("childrenByParent"));
+        assert!(html.contains("parent_id"));
+        assert!(html.contains("column:orders.email"));
     }
 }

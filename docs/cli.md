@@ -65,20 +65,39 @@ simplineage search --json "mart."
 ### `upstream` / `downstream`
 
 Traverse lineage from an object (id, FQN, or unique name fragment).
+Accepts **column** FQNs (`schema.table.column`) and optional `--column` under a parent table.
 
 ```bash
 simplineage upstream public.orders
 simplineage downstream table:orders --max-depth 3 --relations-only
+# Column grain
+simplineage downstream public.orders.email --level column
+simplineage upstream table:orders --column email --level column
 ```
+
+| Flag | Meaning |
+|------|---------|
+| `--level all` | Default — return every related object (tables and columns) |
+| `--level relation` | Tables / views / MVs only (same as `--relations-only`) |
+| `--level column` | Column objects only |
+| `--column NAME` | Resolve `NAME` under the parent identified by `object` |
+| `--relations-only` | Alias for `--level relation` (kept for compatibility) |
 
 ### `impact`
 
-Bidirectional (or single-direction) impact analysis.
+Bidirectional (or single-direction) impact analysis at table or column grain.
 
 ```bash
 simplineage impact public.orders --direction both
 simplineage impact orders -D downstream --json
+# Column impact
+simplineage impact public.orders.email --level column -D both
+simplineage impact public.orders --column email --level column --json
 ```
+
+JSON output keeps `upstream` / `downstream` as **id string arrays** for scripting, and adds
+`subject_fqn`, `subject_kind`, `level`, plus enriched `upstream_nodes` / `downstream_nodes`
+(`id`, `fqn`, `kind`).
 
 ### `validate`
 

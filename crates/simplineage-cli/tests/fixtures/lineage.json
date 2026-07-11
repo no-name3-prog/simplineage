@@ -12,7 +12,8 @@
           "orders"
         ]
       },
-      "name": "orders"
+      "name": "orders",
+      "column_ids": ["column:orders.id", "column:orders.email"]
     },
     {
       "id": "table:order_facts",
@@ -22,7 +23,8 @@
           "order_facts"
         ]
       },
-      "name": "order_facts"
+      "name": "order_facts",
+      "column_ids": ["column:order_facts.order_id", "column:order_facts.email"]
     }
   ],
   "views": [
@@ -35,6 +37,40 @@
         ]
       },
       "name": "order_summary"
+    }
+  ],
+  "columns": [
+    {
+      "id": "column:orders.id",
+      "fqn": { "parts": ["public", "orders", "id"] },
+      "name": "id",
+      "parent_id": "table:orders",
+      "data_type": { "kind": "integer", "bits": 64 },
+      "nullable": false
+    },
+    {
+      "id": "column:orders.email",
+      "fqn": { "parts": ["public", "orders", "email"] },
+      "name": "email",
+      "parent_id": "table:orders",
+      "data_type": { "kind": "string" },
+      "nullable": true
+    },
+    {
+      "id": "column:order_facts.order_id",
+      "fqn": { "parts": ["mart", "order_facts", "order_id"] },
+      "name": "order_id",
+      "parent_id": "table:order_facts",
+      "data_type": { "kind": "integer", "bits": 64 },
+      "nullable": false
+    },
+    {
+      "id": "column:order_facts.email",
+      "fqn": { "parts": ["mart", "order_facts", "email"] },
+      "name": "email",
+      "parent_id": "table:order_facts",
+      "data_type": { "kind": "string" },
+      "nullable": true
     }
   ],
   "dependencies": [
@@ -51,6 +87,20 @@
       "to_id": "view:order_summary",
       "kind": "view_definition",
       "level": "relation"
+    },
+    {
+      "id": "dep:col:id",
+      "from_id": "column:orders.id",
+      "to_id": "column:order_facts.order_id",
+      "kind": "view_definition",
+      "level": "column"
+    },
+    {
+      "id": "dep:col:email",
+      "from_id": "column:orders.email",
+      "to_id": "column:order_facts.email",
+      "kind": "view_definition",
+      "level": "column"
     }
   ]
 }

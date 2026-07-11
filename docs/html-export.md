@@ -26,10 +26,11 @@ Using Docker only (no host Rust): see **[docker.md](docker.md)** — mount `exam
 |---------|----------|
 | **Zoom** | Mouse wheel / trackpad over the canvas; toolbar `+` / `−` |
 | **Pan** | Drag empty canvas background |
-| **Search** | Match by id, FQN, name, or kind; **keeps matches + their full upstream/downstream bright** and dims the rest |
-| **Filters** | Kind checkboxes; *Relations only*; *Hide isolated* |
-| **Metadata side panel** | Click a node for id, FQN, description, neighbors |
+| **Search** | Match by id, FQN, name, or kind; **keeps matches + their full upstream/downstream bright** and dims the rest. **Column hits** reveal column nodes even when *Relations only* is checked |
+| **Filters** | Kind checkboxes; *Relations only* (default on); *Hide isolated* |
+| **Metadata side panel** | Click a node for id, FQN, description, neighbors; **columns list** on tables/views (click a column to focus field lineage); data type + parent on columns |
 | **Lineage focus (click)** | Click a node → **auto-highlight both upstream and downstream**; all other nodes/edges dim. Click empty canvas or **Clear** to reset |
+| **Column lineage** | Smaller column nodes (when shown); dashed column-level edges; selecting a column (canvas or Details) focuses its field path and temporarily reveals those columns under *Relations only* |
 | **Impact analysis** | Upstream / Downstream / Both narrow the auto-focus (client-side BFS on embedded edges) |
 | **Dark mode** | Theme toggle (prefers-color-scheme + localStorage) |
 | **SVG export** | Download current graph as standalone SVG |
@@ -54,8 +55,18 @@ fn demo(snap: &Snapshot) {
 }
 ```
 
+## Layout
+
+The offline report lays out **tables / views first** (relation-level edges only),
+with each layer vertically centered so strips line up. **Columns** are nested
+under their parent relation (`parent_id`), not mixed into the main vertical pack.
+That keeps the default *Relations only* view compact even when the snapshot has
+hundreds of columns.
+
 ## Limitations
 
 - Very large graphs (thousands of nodes) remain usable with filters, but the
   default layout is a simple layered packing — not a force-directed solver.
-- Column nodes are hidden when *Relations only* is checked (default).
+- Column nodes are hidden when *Relations only* is checked (default), except
+  when they participate in the current search/impact focus (so column UX works
+  without unchecking the filter).

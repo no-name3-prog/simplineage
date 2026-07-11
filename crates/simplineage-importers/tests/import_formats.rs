@@ -318,3 +318,87 @@ fn bq_example_dir() -> std::path::PathBuf {
 fn table_names(snap: &simplineage_core::Snapshot) -> Vec<String> {
     snap.tables.iter().map(|t| t.meta.fqn.to_dotted()).collect()
 }
+
+#[test]
+fn column_level_deps_resolve_endpoints() {
+    use simplineage_importers::intermediate::{
+        IntermediateCatalog, IntermediateColumn, IntermediateDependency, IntermediateTable,
+    };
+    use simplineage_importers::{ImportOptions, intermediate_to_snapshot};
+
+    let cat = IntermediateCatalog {
+        source: Some("test".into()),
+        tables: vec![
+            IntermediateTable {
+                catalog: Some("proj".into()),
+                schema: Some("raw".into()),
+                name: "orders".into(),
+                kind: Some("table".into()),
+                ..Default::default()
+            },
+            IntermediateTable {
+                catalog: Some("proj".into()),
+                schema: Some("mart".into()),
+                name: "facts".into(),
+                kind: Some("table".into()),
+                ..Default::default()
+            },
+        ],
+        columns: vec![
+            IntermediateColumn {
+                catalog: Some("proj".into()),
+                schema: Some("raw".into()),
+                table: "orders".into(),
+                name: "email".into(),
+                data_type: Some("STRING".into()),
+                ..Default::default()
+            },
+            IntermediateColumn {
+                catalog: Some("proj".into()),
+                schema: Some("mart".into()),
+                table: "facts".into(),
+                name: "email".into(),
+                data_type: Some("STRING".into()),
+                ..Default::default()
+            },
+        ],
+        relationships: vec![],
+        dependencies: vec![
+            IntermediateDependency {
+                from_schema: Some("raw".into()),
+                from_table: "orders".into(),
+                from_column: None,
+                to_schema: Some("mart".into()),
+                to_table: "facts".into(),
+                to_column: None,
+                kind: Some("pipeline".into()),
+            },
+            IntermediateDependency {
+                from_schema: Some("raw".into()),
+                from_table: "orders".into(),
+                from_column: Some("email".into()),
+                to_schema: Some("mart".into()),
+                to_table: "facts".into(),
+                to_column: Some("email".into()),
+                kind: Some("pipeline".into()),
+            },
+        ],
+    };
+    let snap = intermediate_to_snapshot(&cat, &ImportOptions::default()).unwrap();
+    assert_eq!(snap.dependencies.len(), 2);
+    let col_dep = snap
+        .dependencies
+        .iter()
+        .find(|d| d.level == simplineage_core::model::graph::DependencyLevel::Column)
+        .expect("column dep");
+    assert!(
+        col_dep.from_id.as_str().contains("email"),
+        "{}",
+        col_dep.from_id
+    );
+    assert!(
+        col_dep.to_id.as_str().contains("email"),
+        "{}",
+        col_dep.to_id
+    );
+}

@@ -161,3 +161,103 @@ fn list_importers() {
         .stdout(predicate::str::contains("csv"))
         .stdout(predicate::str::contains("json"));
 }
+
+#[test]
+fn column_level_impact_and_html() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let fix = fixture();
+
+    bin()
+        .args([
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--no-progress",
+            "import",
+            fix.to_str().unwrap(),
+            "--importer",
+            "json",
+            "--label",
+            "col-smoke",
+        ])
+        .assert()
+        .success();
+
+    // Column FQN resolution + column-level filter
+    bin()
+        .args([
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "--no-progress",
+            "downstream",
+            "public.orders.email",
+            "--level",
+            "column",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("column:order_facts.email"))
+        .stdout(predicate::str::contains("\"level\": \"column\""));
+
+    // --column under a parent table
+    bin()
+        .args([
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "--no-progress",
+            "impact",
+            "table:orders",
+            "--column",
+            "id",
+            "--level",
+            "column",
+            "--direction",
+            "downstream",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("column:order_facts.order_id"))
+        .stdout(predicate::str::contains("\"subject_kind\": \"column\""));
+
+    // Existing relation-only path still works
+    bin()
+        .args([
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "--no-progress",
+            "downstream",
+            "table:orders",
+            "--relations-only",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("table:order_facts"));
+
+    let html = dir.path().join("lineage.html");
+    bin()
+        .args([
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--no-progress",
+            "export",
+            "-f",
+            "html",
+            "-o",
+            html.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let body = std::fs::read_to_string(&html).unwrap();
+    assert!(
+        body.contains("parent_id"),
+        "HTML payload should include parent_id for columns"
+    );
+    assert!(
+        body.contains("d-columns"),
+        "HTML should include columns panel"
+    );
+    assert!(body.contains("column:orders.email"));
+}

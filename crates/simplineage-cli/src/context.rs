@@ -78,9 +78,27 @@ impl AppContext {
 
 /// Resolve a user-supplied object reference (id or FQN fragment) against a snapshot.
 pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<ObjectId> {
+    resolve_object_ex(snapshot, query, None)
+}
+
+/// Resolve an object, optionally scoping to a column under a parent relation.
+///
+/// When `column` is `Some("email")` and `query` resolves to a table/view, returns
+/// the child column whose leaf name matches (case-insensitive).
+///
+/// `query` may also be a full column FQN (`schema.table.column`) or id.
+pub fn resolve_object_ex(
+    snapshot: &Snapshot,
+    query: &str,
+    column: Option<&str>,
+) -> anyhow::Result<ObjectId> {
     let q = query.trim();
     if q.is_empty() {
         bail!("object id / FQN must not be empty");
+    }
+
+    if let Some(col) = column.map(str::trim).filter(|c| !c.is_empty()) {
+        return resolve_column_under(snapshot, q, col);
     }
 
     let index = snapshot.object_index();
@@ -100,16 +118,41 @@ pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<Object
         }
     }
 
-    // Exact FQN
+    // Exact FQN (case-sensitive then case-insensitive)
     for (id, obj) in &index {
         if obj.meta().fqn.to_dotted() == q {
             return Ok(id.clone());
         }
     }
+    let q_lower = q.to_ascii_lowercase();
+    let exact_fqn: Vec<_> = index
+        .iter()
+        .filter(|(_, obj)| obj.meta().fqn.to_dotted().eq_ignore_ascii_case(q))
+        .map(|(id, _)| id.clone())
+        .collect();
+    if exact_fqn.len() == 1 {
+        return Ok(exact_fqn[0].clone());
+    }
+
+    // Prefer column when query looks like schema.table.column (≥3 dotted parts)
+    let part_count = q.split('.').filter(|p| !p.is_empty()).count();
+    if part_count >= 3 {
+        let col_hits: Vec<_> = index
+            .iter()
+            .filter(|(_, obj)| {
+                obj.kind_name() == "column"
+                    && (obj.meta().fqn.to_dotted().eq_ignore_ascii_case(q)
+                        || obj.meta().fqn.to_dotted().to_ascii_lowercase() == q_lower)
+            })
+            .map(|(id, obj)| (id.clone(), obj.meta().fqn.to_dotted()))
+            .collect();
+        if col_hits.len() == 1 {
+            return Ok(col_hits[0].0.clone());
+        }
+    }
 
     // Case-insensitive id / fqn / name
-    let q_lower = q.to_ascii_lowercase();
-    let mut matches: Vec<(ObjectId, String)> = Vec::new();
+    let mut matches: Vec<(ObjectId, String, &'static str)> = Vec::new();
     for (id, obj) in &index {
         let fqn = obj.meta().fqn.to_dotted();
         let name = obj.meta().name.clone();
@@ -119,7 +162,7 @@ pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<Object
             || fqn.to_ascii_lowercase().contains(&q_lower)
             || id.as_str().to_ascii_lowercase().contains(&q_lower)
         {
-            matches.push((id.clone(), fqn));
+            matches.push((id.clone(), fqn, obj.kind_name()));
         }
     }
 
@@ -127,9 +170,9 @@ pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<Object
     for dep in &snapshot.dependencies {
         for endpoint in [&dep.from_id, &dep.to_id] {
             if endpoint.as_str().to_ascii_lowercase().contains(&q_lower)
-                && !matches.iter().any(|(i, _)| i == endpoint)
+                && !matches.iter().any(|(i, _, _)| i == endpoint)
             {
-                matches.push((endpoint.clone(), endpoint.to_string()));
+                matches.push((endpoint.clone(), endpoint.to_string(), "unknown"));
             }
         }
     }
@@ -141,7 +184,7 @@ pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<Object
             // Prefer exact leaf name match
             let exact_name: Vec<_> = matches
                 .iter()
-                .filter(|(id, fqn)| {
+                .filter(|(id, fqn, _)| {
                     index
                         .get(id)
                         .map(|o| o.meta().name.eq_ignore_ascii_case(q))
@@ -156,10 +199,21 @@ pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<Object
             if exact_name.len() == 1 {
                 return Ok(exact_name[0].0.clone());
             }
+            // When the query has 3+ parts, prefer columns among exact leaf matches
+            if part_count >= 3 {
+                let cols: Vec<_> = exact_name
+                    .iter()
+                    .filter(|(_, _, kind)| *kind == "column")
+                    .cloned()
+                    .collect();
+                if cols.len() == 1 {
+                    return Ok(cols[0].0.clone());
+                }
+            }
             let preview: Vec<String> = matches
                 .iter()
                 .take(8)
-                .map(|(id, fqn)| format!("{id} ({fqn})"))
+                .map(|(id, fqn, kind)| format!("{id} ({kind}: {fqn})"))
                 .collect();
             bail!(
                 "ambiguous object '{q}' — matches {}: {}",
@@ -168,6 +222,93 @@ pub fn resolve_object(snapshot: &Snapshot, query: &str) -> anyhow::Result<Object
             )
         }
     }
+}
+
+/// Resolve `column_name` under a parent relation identified by `parent_query`.
+fn resolve_column_under(
+    snapshot: &Snapshot,
+    parent_query: &str,
+    column_name: &str,
+) -> anyhow::Result<ObjectId> {
+    let parent = resolve_object(snapshot, parent_query)?;
+    let col_lower = column_name.to_ascii_lowercase();
+
+    // Direct child columns via parent_id
+    let mut hits: Vec<(ObjectId, String)> = snapshot
+        .columns
+        .iter()
+        .filter(|c| c.parent_id == parent)
+        .filter(|c| {
+            c.meta.name.eq_ignore_ascii_case(column_name)
+                || c.meta
+                    .fqn
+                    .to_dotted()
+                    .to_ascii_lowercase()
+                    .ends_with(&format!(".{col_lower}"))
+        })
+        .map(|c| (c.meta.id.clone(), c.meta.fqn.to_dotted()))
+        .collect();
+
+    if hits.is_empty() {
+        // Fallback: FQN = parent_fqn.column or id contains parent + column
+        let index = snapshot.object_index();
+        let parent_fqn = index
+            .get(&parent)
+            .map(|o| o.meta().fqn.to_dotted())
+            .unwrap_or_else(|| parent.to_string());
+        let want = format!("{parent_fqn}.{column_name}").to_ascii_lowercase();
+        for c in &snapshot.columns {
+            let fqn = c.meta.fqn.to_dotted().to_ascii_lowercase();
+            if fqn == want
+                || (fqn.ends_with(&format!(".{col_lower}"))
+                    && fqn.contains(&parent_fqn.to_ascii_lowercase()))
+            {
+                hits.push((c.meta.id.clone(), c.meta.fqn.to_dotted()));
+            }
+        }
+    }
+
+    // Dedup
+    hits.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    hits.dedup_by(|a, b| a.0 == b.0);
+
+    match hits.len() {
+        0 => bail!(
+            "no column '{column_name}' under object resolved from '{parent_query}' ({parent})"
+        ),
+        1 => Ok(hits.remove(0).0),
+        _ => {
+            let preview: Vec<String> = hits
+                .iter()
+                .take(8)
+                .map(|(id, fqn)| format!("{id} ({fqn})"))
+                .collect();
+            bail!(
+                "ambiguous column '{column_name}' under '{parent_query}': {}",
+                preview.join(", ")
+            )
+        }
+    }
+}
+
+/// Display label for an object (prefer FQN, fall back to id).
+pub fn object_display(snapshot: &Snapshot, id: &ObjectId) -> String {
+    if let Some(obj) = snapshot.object_index().get(id) {
+        let fqn = obj.meta().fqn.to_dotted();
+        if !fqn.is_empty() {
+            return fqn;
+        }
+    }
+    id.to_string()
+}
+
+/// Kind label for an object when known.
+pub fn object_kind_label(snapshot: &Snapshot, id: &ObjectId) -> &'static str {
+    snapshot
+        .object_index()
+        .get(id)
+        .map(|o| o.kind_name())
+        .unwrap_or("unknown")
 }
 
 /// Search hit (owned fields for display).

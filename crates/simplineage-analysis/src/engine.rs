@@ -120,7 +120,10 @@ impl AnalysisEngine {
             downstream = self.graph.downstream(id, &trav)?;
         }
 
-        if opts.relations_only {
+        if opts.columns_only {
+            upstream.retain(|n| self.is_column(n));
+            downstream.retain(|n| self.is_column(n));
+        } else if opts.relations_only {
             upstream.retain(|n| self.is_relation(n));
             downstream.retain(|n| self.is_relation(n));
         }
@@ -643,6 +646,16 @@ impl AnalysisEngine {
             // Unknown kinds (edge-only nodes): treat as relation for impact convenience
             None => true,
         }
+    }
+
+    fn is_column(&self, id: &ObjectId) -> bool {
+        matches!(self.kinds.get(id).copied(), Some("column"))
+    }
+
+    /// Look up a catalog kind label for `id` when known.
+    #[must_use]
+    pub fn object_kind(&self, id: &ObjectId) -> Option<&'static str> {
+        self.kinds.get(id).copied()
     }
 }
 

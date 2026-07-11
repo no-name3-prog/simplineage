@@ -154,9 +154,9 @@ enum Commands {
         snapshot: Option<String>,
     },
 
-    /// List upstream providers for an object.
+    /// List upstream providers for an object (table or column).
     Upstream {
-        /// Object id or FQN (or unique name fragment).
+        /// Object id or FQN (or unique name fragment). Accepts `schema.table.column`.
         object: String,
         /// Snapshot id or JSON file.
         #[arg(long, short = 's')]
@@ -164,14 +164,20 @@ enum Commands {
         /// Maximum hop depth.
         #[arg(long)]
         max_depth: Option<usize>,
-        /// Restrict to tables / views / MVs.
+        /// Restrict to tables / views / MVs (alias for `--level relation`).
         #[arg(long)]
         relations_only: bool,
+        /// Result grain: `all` (default), `relation`, or `column`.
+        #[arg(long, default_value = "all", value_parser = ["all", "auto", "relation", "relations", "column", "columns", "table", "tables", "both"])]
+        level: String,
+        /// Column name when `object` is a parent table/view (e.g. `--column email`).
+        #[arg(long, short = 'c')]
+        column: Option<String>,
     },
 
-    /// List downstream consumers for an object.
+    /// List downstream consumers for an object (table or column).
     Downstream {
-        /// Object id or FQN (or unique name fragment).
+        /// Object id or FQN (or unique name fragment). Accepts `schema.table.column`.
         object: String,
         /// Snapshot id or JSON file.
         #[arg(long, short = 's')]
@@ -179,14 +185,20 @@ enum Commands {
         /// Maximum hop depth.
         #[arg(long)]
         max_depth: Option<usize>,
-        /// Restrict to tables / views / MVs.
+        /// Restrict to tables / views / MVs (alias for `--level relation`).
         #[arg(long)]
         relations_only: bool,
+        /// Result grain: `all` (default), `relation`, or `column`.
+        #[arg(long, default_value = "all", value_parser = ["all", "auto", "relation", "relations", "column", "columns", "table", "tables", "both"])]
+        level: String,
+        /// Column name when `object` is a parent table/view (e.g. `--column email`).
+        #[arg(long, short = 'c')]
+        column: Option<String>,
     },
 
-    /// Impact analysis (upstream, downstream, or both).
+    /// Impact analysis (upstream, downstream, or both) at table or column grain.
     Impact {
-        /// Object id or FQN (or unique name fragment).
+        /// Object id or FQN (or unique name fragment). Accepts `schema.table.column`.
         object: String,
         /// Snapshot id or JSON file.
         #[arg(long, short = 's')]
@@ -197,9 +209,15 @@ enum Commands {
         /// Maximum hop depth.
         #[arg(long)]
         max_depth: Option<usize>,
-        /// Restrict to tables / views / MVs.
+        /// Restrict to tables / views / MVs (alias for `--level relation`).
         #[arg(long)]
         relations_only: bool,
+        /// Result grain: `all` (default), `relation`, or `column`.
+        #[arg(long, default_value = "all", value_parser = ["all", "auto", "relation", "relations", "column", "columns", "table", "tables", "both"])]
+        level: String,
+        /// Column name when `object` is a parent table/view (e.g. `--column email`).
+        #[arg(long, short = 'c')]
+        column: Option<String>,
     },
 
     /// Validate dependencies and metadata quality.
@@ -393,6 +411,8 @@ fn run() -> anyhow::Result<()> {
             snapshot,
             max_depth,
             relations_only,
+            level,
+            column,
         } => commands::run_upstream(
             &ctx,
             LineageArgs {
@@ -400,6 +420,8 @@ fn run() -> anyhow::Result<()> {
                 snapshot,
                 max_depth,
                 relations_only,
+                level,
+                column,
                 no_progress,
             },
         ),
@@ -408,6 +430,8 @@ fn run() -> anyhow::Result<()> {
             snapshot,
             max_depth,
             relations_only,
+            level,
+            column,
         } => commands::run_downstream(
             &ctx,
             LineageArgs {
@@ -415,6 +439,8 @@ fn run() -> anyhow::Result<()> {
                 snapshot,
                 max_depth,
                 relations_only,
+                level,
+                column,
                 no_progress,
             },
         ),
@@ -424,6 +450,8 @@ fn run() -> anyhow::Result<()> {
             direction,
             max_depth,
             relations_only,
+            level,
+            column,
         } => commands::run_impact(
             &ctx,
             ImpactArgs {
@@ -432,6 +460,8 @@ fn run() -> anyhow::Result<()> {
                 direction,
                 max_depth,
                 relations_only,
+                level,
+                column,
                 no_progress,
             },
         ),

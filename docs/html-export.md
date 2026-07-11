@@ -26,10 +26,11 @@ Using Docker only (no host Rust): see **[docker.md](docker.md)** — mount `exam
 |---------|----------|
 | **Zoom** | Mouse wheel / trackpad over the canvas; toolbar `+` / `−` |
 | **Pan** | Drag empty canvas background |
-| **Search** | Filter/highlight nodes by id, FQN, name, or kind |
+| **Search** | Match by id, FQN, name, or kind; **keeps matches + their full upstream/downstream bright** and dims the rest |
 | **Filters** | Kind checkboxes; *Relations only*; *Hide isolated* |
 | **Metadata side panel** | Click a node for id, FQN, description, neighbors |
-| **Impact analysis** | Upstream / Downstream / Both (client-side BFS on embedded edges) |
+| **Lineage focus (click)** | Click a node → **auto-highlight both upstream and downstream**; all other nodes/edges dim. Click empty canvas or **Clear** to reset |
+| **Impact analysis** | Upstream / Downstream / Both narrow the auto-focus (client-side BFS on embedded edges) |
 | **Dark mode** | Theme toggle (prefers-color-scheme + localStorage) |
 | **SVG export** | Download current graph as standalone SVG |
 | **Mermaid export** | Download visible graph as Mermaid flowchart (also `export -f mermaid`) |

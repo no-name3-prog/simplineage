@@ -25,7 +25,14 @@ pub struct ImpactOptions {
     /// Maximum hop depth (`None` = unlimited).
     pub max_depth: Option<usize>,
     /// Restrict results to tables / views / MVs only (exclude columns when known).
+    ///
+    /// Ignored when [`Self::columns_only`] is `true`.
     pub relations_only: bool,
+    /// Restrict results to column objects only.
+    ///
+    /// When both this and [`Self::relations_only`] are set, **columns win**
+    /// (column-level impact is the more specific request).
+    pub columns_only: bool,
 }
 
 impl Default for ImpactOptions {
@@ -34,6 +41,7 @@ impl Default for ImpactOptions {
             direction: ImpactDirection::Downstream,
             max_depth: None,
             relations_only: false,
+            columns_only: false,
         }
     }
 }

@@ -31,7 +31,8 @@ let full = engine.analyze_all();
 
 | Method | Description |
 |--------|-------------|
-| `impact` | Upstream / downstream / both blast radius |
+| `impact` | Upstream / downstream / both blast radius (`relations_only` / `columns_only` filters) |
+| `object_kind` | Catalog kind label for an id when known |
 | `validate_dependencies` | Missing endpoints, self-loops, confidence, duplicates |
 | `unused_objects` | Nodes with consumers missing (in>0, out=0) |
 | `orphans` | Fully disconnected nodes (in=0, out=0) |

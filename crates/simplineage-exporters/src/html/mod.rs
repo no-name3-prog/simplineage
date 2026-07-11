@@ -79,6 +79,12 @@ pub struct ReportNode {
     pub fqn: String,
     /// Optional description.
     pub description: Option<String>,
+    /// Parent relation id for columns (enables table → column panel UX).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Short data-type label for columns when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_type: Option<String>,
     /// Layout layer (0 = sources).
     pub layer: usize,
     /// Suggested x coordinate (layout units).
@@ -118,16 +124,33 @@ fn build_report_data_inner(snapshot: &Snapshot, layout: bool) -> ReportData {
     let index = snapshot.object_index();
     let mut nodes_map: BTreeMap<String, ReportNode> = BTreeMap::new();
 
+    // Column extras keyed by object id.
+    let mut column_meta: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
+    for c in &snapshot.columns {
+        let dtype = c
+            .raw_type
+            .clone()
+            .or_else(|| Some(data_type_label(&c.data_type)));
+        column_meta.insert(c.meta.id.to_string(), (c.parent_id.to_string(), dtype));
+    }
+
     for (id, obj) in &index {
         let meta = obj.meta();
+        let key = id.as_str().to_string();
+        let (parent_id, data_type) = column_meta
+            .get(&key)
+            .map(|(p, d)| (Some(p.clone()), d.clone()))
+            .unwrap_or((None, None));
         nodes_map.insert(
-            id.as_str().to_string(),
+            key,
             ReportNode {
                 id: id.to_string(),
                 kind: obj.kind_name().to_string(),
                 name: meta.name.clone(),
                 fqn: meta.fqn.to_dotted(),
                 description: meta.description.clone(),
+                parent_id,
+                data_type,
                 layer: 0,
                 x: 0.0,
                 y: 0.0,
@@ -144,6 +167,8 @@ fn build_report_data_inner(snapshot: &Snapshot, layout: bool) -> ReportData {
                 name: leaf_name(&key),
                 fqn: key,
                 description: None,
+                parent_id: None,
+                data_type: None,
                 layer: 0,
                 x: 0.0,
                 y: 0.0,
@@ -247,8 +272,9 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
         <div class="filter-group" id="kind-filters"></div>
         <label class="check"><input type="checkbox" id="hide-isolated"/> Hide isolated</label>
         <label class="check"><input type="checkbox" id="relations-only" checked/> Relations only</label>
+        <p class="hint">Uncheck <em>Relations only</em> to plot column nodes. Selecting a column (or a column in Details) still focuses field-level lineage while relations-only is on.</p>
         <h2>Impact</h2>
-        <p class="hint">Click a node to auto-highlight its upstream and downstream (others dim). Search does the same for matches. Narrow with Upstream / Downstream / Both.</p>
+        <p class="hint">Click a node to auto-highlight its upstream and downstream (others dim). Search does the same for matches — column hits reveal column paths. Narrow with Upstream / Downstream / Both.</p>
         <div class="btn-row">
           <button type="button" id="btn-up" class="btn" disabled>Upstream</button>
           <button type="button" id="btn-down" class="btn" disabled>Downstream</button>
@@ -271,7 +297,7 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
             <g id="nodes"></g>
           </g>
         </svg>
-        <div class="canvas-hint muted">Scroll to zoom · drag to pan · click a node to focus lineage · click empty canvas to clear</div>
+        <div class="canvas-hint muted">Scroll to zoom · drag to pan · click a node (table or column) to focus lineage · click empty canvas to clear</div>
       </section>
       <aside class="sidebar right" id="detail-panel">
         <h2>Details</h2>
@@ -282,6 +308,10 @@ pub fn render_html_report(snapshot: &Snapshot) -> Result<String> {
           <p class="mono" id="d-fqn"></p>
           <p class="mono muted" id="d-id"></p>
           <p id="d-desc" class="desc"></p>
+          <p id="d-dtype" class="mono muted hidden"></p>
+          <p id="d-parent" class="mono muted hidden"></p>
+          <h3 id="d-columns-heading" class="hidden">Columns</h3>
+          <div id="d-columns" class="hidden"></div>
           <h3>Neighbors</h3>
           <div id="d-neighbors"></div>
         </div>
@@ -524,6 +554,41 @@ fn leaf_name(s: &str) -> String {
     s.rsplit(['.', '/', ':']).next().unwrap_or(s).to_string()
 }
 
+fn data_type_label(dt: &simplineage_core::model::types::DataType) -> String {
+    use simplineage_core::model::types::DataType;
+    match dt {
+        DataType::Boolean => "boolean".into(),
+        DataType::Integer { bits } => bits
+            .map(|b| format!("integer({b})"))
+            .unwrap_or_else(|| "integer".into()),
+        DataType::Decimal { precision, scale } => match (precision, scale) {
+            (Some(p), Some(s)) => format!("decimal({p},{s})"),
+            (Some(p), None) => format!("decimal({p})"),
+            _ => "decimal".into(),
+        },
+        DataType::Float { bits } => bits
+            .map(|b| format!("float({b})"))
+            .unwrap_or_else(|| "float".into()),
+        DataType::String { max_length, .. } => max_length
+            .map(|n| format!("string({n})"))
+            .unwrap_or_else(|| "string".into()),
+        DataType::Binary { max_length } => max_length
+            .map(|n| format!("binary({n})"))
+            .unwrap_or_else(|| "binary".into()),
+        DataType::Date => "date".into(),
+        DataType::Time { .. } => "time".into(),
+        DataType::Timestamp { .. } => "timestamp".into(),
+        DataType::Json => "json".into(),
+        DataType::Array { .. } => "array".into(),
+        DataType::Map { .. } => "map".into(),
+        DataType::Struct { .. } => "struct".into(),
+        DataType::Spatial => "spatial".into(),
+        DataType::Uuid => "uuid".into(),
+        DataType::Other { name } => name.clone(),
+        DataType::Unknown => "unknown".into(),
+    }
+}
+
 fn dep_kind_label(kind: &DependencyKind) -> String {
     match kind {
         // Keep short label for Other (not other: prefix) in the HTML payload.
@@ -545,7 +610,8 @@ mod tests {
     use simplineage_core::ObjectId;
     use simplineage_core::model::graph::{Dependency, DependencyKind, DependencyLevel};
     use simplineage_core::model::ids::FullyQualifiedName;
-    use simplineage_core::model::objects::{ObjectMeta, Table, View};
+    use simplineage_core::model::objects::{Column, ObjectMeta, Table, View};
+    use simplineage_core::model::types::DataType;
 
     fn sample() -> Snapshot {
         let mut s = Snapshot::new();
@@ -556,7 +622,7 @@ mod tests {
                 FullyQualifiedName::parse_dotted("raw.orders").unwrap(),
             ),
             schema_id: None,
-            column_ids: vec![],
+            column_ids: vec![ObjectId::from_trusted("column:orders.email")],
         });
         s.views.push(View {
             meta: ObjectMeta::new(
@@ -564,8 +630,38 @@ mod tests {
                 FullyQualifiedName::parse_dotted("staging.stg_orders").unwrap(),
             ),
             schema_id: None,
-            column_ids: vec![],
+            column_ids: vec![ObjectId::from_trusted("column:stg.email")],
             definition: None,
+        });
+        s.columns.push(Column {
+            meta: ObjectMeta::new(
+                ObjectId::from_trusted("column:orders.email"),
+                FullyQualifiedName::parse_dotted("raw.orders.email").unwrap(),
+            ),
+            parent_id: ObjectId::from_trusted("table:orders"),
+            ordinal: Some(0),
+            data_type: DataType::String {
+                max_length: None,
+                is_char_length: None,
+            },
+            nullable: true,
+            is_primary_key: None,
+            raw_type: Some("VARCHAR".into()),
+        });
+        s.columns.push(Column {
+            meta: ObjectMeta::new(
+                ObjectId::from_trusted("column:stg.email"),
+                FullyQualifiedName::parse_dotted("staging.stg_orders.email").unwrap(),
+            ),
+            parent_id: ObjectId::from_trusted("view:stg"),
+            ordinal: Some(0),
+            data_type: DataType::String {
+                max_length: None,
+                is_char_length: None,
+            },
+            nullable: true,
+            is_primary_key: None,
+            raw_type: None,
         });
         s.dependencies.push(Dependency {
             id: ObjectId::from_trusted("d1"),
@@ -576,25 +672,39 @@ mod tests {
             confidence: None,
             attributes: Default::default(),
         });
+        s.dependencies.push(Dependency {
+            id: ObjectId::from_trusted("d-col"),
+            from_id: ObjectId::from_trusted("column:orders.email"),
+            to_id: ObjectId::from_trusted("column:stg.email"),
+            kind: DependencyKind::ViewDefinition,
+            level: DependencyLevel::Column,
+            confidence: None,
+            attributes: Default::default(),
+        });
         s
     }
 
     #[test]
     fn builds_layers() {
         let data = build_report_data(&sample());
-        assert_eq!(data.nodes.len(), 2);
-        assert_eq!(data.edges.len(), 1);
+        assert_eq!(data.nodes.len(), 4);
+        assert_eq!(data.edges.len(), 2);
         let orders = data.nodes.iter().find(|n| n.id == "table:orders").unwrap();
         let stg = data.nodes.iter().find(|n| n.id == "view:stg").unwrap();
         assert!(stg.layer >= orders.layer);
         assert!(stg.x >= orders.x);
+        let col = data
+            .nodes
+            .iter()
+            .find(|n| n.id == "column:orders.email")
+            .unwrap();
+        assert_eq!(col.kind, "column");
+        assert_eq!(col.parent_id.as_deref(), Some("table:orders"));
+        assert_eq!(col.data_type.as_deref(), Some("VARCHAR"));
     }
 
     #[test]
     fn connected_nodes_not_pushed_by_isolated_catalog() {
-        use simplineage_core::model::objects::Column;
-        use simplineage_core::model::types::DataType;
-
         let mut s = sample();
         // Many isolated columns used to pack into layer 0 and push sources down.
         for i in 0..40 {
@@ -641,5 +751,10 @@ mod tests {
         assert!(html.contains("computeFocus"));
         assert!(html.contains("lineageSets"));
         assert!(html.contains("auto-highlight"));
+        // Column-level UX
+        assert!(html.contains("d-columns"));
+        assert!(html.contains("childrenByParent"));
+        assert!(html.contains("parent_id"));
+        assert!(html.contains("column:orders.email"));
     }
 }

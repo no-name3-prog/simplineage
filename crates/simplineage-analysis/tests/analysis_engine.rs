@@ -5,7 +5,8 @@ use simplineage_analysis::{
 };
 use simplineage_core::model::graph::{Dependency, DependencyKind, DependencyLevel};
 use simplineage_core::model::ids::FullyQualifiedName;
-use simplineage_core::model::objects::{ObjectMeta, Schema, Table};
+use simplineage_core::model::objects::{Column, ObjectMeta, Schema, Table};
+use simplineage_core::model::types::DataType;
 use simplineage_core::{ObjectId, Snapshot};
 
 fn oid(s: &str) -> ObjectId {
@@ -140,4 +141,79 @@ fn detects_cycle_in_analysis() {
     assert!(!cycles.is_empty());
     let q = engine.quality_checks();
     assert!(q.checks.iter().any(|c| c.id == "no_cycles" && !c.passed));
+}
+
+#[test]
+fn column_level_impact_filter() {
+    let mut s = catalog();
+    s.columns.push(Column {
+        meta: ObjectMeta::new(
+            oid("col:raw.email"),
+            FullyQualifiedName::parse_dotted("public.raw_orders.email").unwrap(),
+        ),
+        parent_id: oid("table:raw_orders"),
+        ordinal: Some(0),
+        data_type: DataType::String {
+            max_length: None,
+            is_char_length: None,
+        },
+        nullable: true,
+        is_primary_key: None,
+        raw_type: None,
+    });
+    s.columns.push(Column {
+        meta: ObjectMeta::new(
+            oid("col:stg.email"),
+            FullyQualifiedName::parse_dotted("public.stg_orders.email").unwrap(),
+        ),
+        parent_id: oid("table:stg_orders"),
+        ordinal: Some(0),
+        data_type: DataType::String {
+            max_length: None,
+            is_char_length: None,
+        },
+        nullable: true,
+        is_primary_key: None,
+        raw_type: None,
+    });
+    s.dependencies.push(Dependency {
+        id: oid("dep:col-email"),
+        from_id: oid("col:raw.email"),
+        to_id: oid("col:stg.email"),
+        kind: DependencyKind::ViewDefinition,
+        level: DependencyLevel::Column,
+        confidence: None,
+        attributes: Default::default(),
+    });
+
+    let engine = AnalysisEngine::from_snapshot(s);
+    assert_eq!(engine.object_kind(&oid("col:raw.email")), Some("column"));
+
+    let col_impact = engine
+        .impact(
+            &oid("col:raw.email"),
+            &ImpactOptions {
+                direction: ImpactDirection::Downstream,
+                columns_only: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(col_impact.downstream.len(), 1);
+    assert_eq!(col_impact.downstream[0].as_str(), "col:stg.email");
+
+    // Relation-only filter should drop pure column neighbors when starting from a table
+    // that also has table edges — columns_only from a column subject is the column path.
+    let mixed = engine
+        .impact(
+            &oid("col:raw.email"),
+            &ImpactOptions {
+                direction: ImpactDirection::Downstream,
+                relations_only: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    // only column downstream exists; relations_only filters it out
+    assert!(mixed.downstream.is_empty());
 }

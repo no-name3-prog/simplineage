@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 use simplineage_analysis::{ImpactDirection, ImpactOptions};
+use simplineage_core::ObjectId;
 
 use crate::context::{self, AppContext};
 use crate::output::{self};
@@ -13,6 +14,10 @@ pub struct LineageArgs {
     pub snapshot: Option<String>,
     pub max_depth: Option<usize>,
     pub relations_only: bool,
+    /// Lineage level filter: `all`, `relation`, or `column`.
+    pub level: String,
+    /// Optional column name when `object` is a parent relation.
+    pub column: Option<String>,
     pub no_progress: bool,
 }
 
@@ -23,16 +28,41 @@ pub struct ImpactArgs {
     pub direction: String,
     pub max_depth: Option<usize>,
     pub relations_only: bool,
+    /// Lineage level filter: `all`, `relation`, or `column`.
+    pub level: String,
+    /// Optional column name when `object` is a parent relation.
+    pub column: Option<String>,
     pub no_progress: bool,
+}
+
+/// Enriched node row (JSON detail + text formatting).
+#[derive(Debug, Serialize)]
+struct ImpactNodeOut {
+    id: String,
+    fqn: String,
+    kind: String,
 }
 
 #[derive(Debug, Serialize)]
 struct ImpactOut {
+    /// Subject object id (stable for scripting).
     subject: String,
+    /// Human-readable FQN when known.
+    subject_fqn: String,
+    /// Catalog kind (`table`, `column`, …).
+    subject_kind: String,
     direction: String,
+    /// Active level filter: `all` | `relation` | `column`.
+    level: String,
     total_affected: usize,
+    /// Upstream object ids (backward-compatible).
     upstream: Vec<String>,
+    /// Downstream object ids (backward-compatible).
     downstream: Vec<String>,
+    /// Enriched upstream rows.
+    upstream_nodes: Vec<ImpactNodeOut>,
+    /// Enriched downstream rows.
+    downstream_nodes: Vec<ImpactNodeOut>,
 }
 
 pub fn run_upstream(ctx: &AppContext, args: LineageArgs) -> anyhow::Result<()> {
@@ -57,13 +87,15 @@ fn run_direction(
     };
 
     let engine = ctx.analysis_engine(args.snapshot.as_deref())?;
-    let id = context::resolve_object(engine.snapshot(), &args.object)?;
+    let id = context::resolve_object_ex(engine.snapshot(), &args.object, args.column.as_deref())?;
+    let level = resolve_level(&args.level, args.relations_only)?;
     let report = engine.impact(
         &id,
         &ImpactOptions {
             direction,
             max_depth: args.max_depth,
-            relations_only: args.relations_only,
+            relations_only: level.relations_only,
+            columns_only: level.columns_only,
         },
     )?;
 
@@ -71,38 +103,33 @@ fn run_direction(
         progress::finish_clear(pb);
     }
 
-    let nodes = match direction {
-        ImpactDirection::Upstream => &report.upstream,
-        ImpactDirection::Downstream => &report.downstream,
-        ImpactDirection::Both => {
-            // shouldn't hit for directional cmds
-            &report.downstream
-        }
-    };
-
-    let out = ImpactOut {
-        subject: report.subject.to_string(),
-        direction: direction_str(direction).into(),
-        total_affected: nodes.len(),
-        upstream: report.upstream.iter().map(|o| o.to_string()).collect(),
-        downstream: report.downstream.iter().map(|o| o.to_string()).collect(),
-    };
+    let out = build_impact_out(engine.snapshot(), &report, direction, &level);
 
     if style.json {
         output::print_json(&out)?;
         return Ok(());
     }
 
-    output::header(style, &format!("{title} of {}", out.subject));
-    output::kv(style, "count", nodes.len());
+    let side = match direction {
+        ImpactDirection::Upstream => &out.upstream_nodes,
+        ImpactDirection::Downstream => &out.downstream_nodes,
+        ImpactDirection::Both => &out.downstream_nodes,
+    };
+
+    output::header(
+        style,
+        &format!("{title} of {} ({})", out.subject_fqn, out.subject_kind),
+    );
+    output::kv(style, "level", &out.level);
+    output::kv(style, "count", side.len());
     if let Some(d) = args.max_depth {
         output::kv(style, "max_depth", d);
     }
-    if nodes.is_empty() {
+    if side.is_empty() {
         output::muted(style, "No related objects in this direction.");
     } else {
-        for n in nodes {
-            output::bullet(style, n.as_str());
+        for n in side {
+            output::bullet(style, &format!("[{}] {}", n.kind, n.fqn));
         }
     }
     Ok(())
@@ -119,13 +146,15 @@ pub fn run_impact(ctx: &AppContext, args: ImpactArgs) -> anyhow::Result<()> {
     };
 
     let engine = ctx.analysis_engine(args.snapshot.as_deref())?;
-    let id = context::resolve_object(engine.snapshot(), &args.object)?;
+    let id = context::resolve_object_ex(engine.snapshot(), &args.object, args.column.as_deref())?;
+    let level = resolve_level(&args.level, args.relations_only)?;
     let report = engine.impact(
         &id,
         &ImpactOptions {
             direction,
             max_depth: args.max_depth,
-            relations_only: args.relations_only,
+            relations_only: level.relations_only,
+            columns_only: level.columns_only,
         },
     )?;
 
@@ -133,39 +162,114 @@ pub fn run_impact(ctx: &AppContext, args: ImpactArgs) -> anyhow::Result<()> {
         progress::finish_clear(pb);
     }
 
-    let out = ImpactOut {
-        subject: report.subject.to_string(),
-        direction: direction_str(direction).into(),
-        total_affected: report.total_affected,
-        upstream: report.upstream.iter().map(|o| o.to_string()).collect(),
-        downstream: report.downstream.iter().map(|o| o.to_string()).collect(),
-    };
+    let out = build_impact_out(engine.snapshot(), &report, direction, &level);
 
     if style.json {
         output::print_json(&out)?;
         return Ok(());
     }
 
-    output::header(style, &format!("Impact analysis: {}", out.subject));
+    output::header(
+        style,
+        &format!(
+            "Impact analysis: {} ({})",
+            out.subject_fqn, out.subject_kind
+        ),
+    );
     output::kv(style, "direction", &out.direction);
+    output::kv(style, "level", &out.level);
     output::kv(style, "total_affected", out.total_affected);
 
-    if !out.upstream.is_empty() {
-        output::header(style, &format!("Upstream ({})", out.upstream.len()));
-        for n in &out.upstream {
-            output::bullet(style, n);
+    if !out.upstream_nodes.is_empty() {
+        output::header(style, &format!("Upstream ({})", out.upstream_nodes.len()));
+        for n in &out.upstream_nodes {
+            output::bullet(style, &format!("[{}] {}", n.kind, n.fqn));
         }
     }
-    if !out.downstream.is_empty() {
-        output::header(style, &format!("Downstream ({})", out.downstream.len()));
-        for n in &out.downstream {
-            output::bullet(style, n);
+    if !out.downstream_nodes.is_empty() {
+        output::header(
+            style,
+            &format!("Downstream ({})", out.downstream_nodes.len()),
+        );
+        for n in &out.downstream_nodes {
+            output::bullet(style, &format!("[{}] {}", n.kind, n.fqn));
         }
     }
-    if out.upstream.is_empty() && out.downstream.is_empty() {
+    if out.upstream_nodes.is_empty() && out.downstream_nodes.is_empty() {
         output::muted(style, "No affected objects.");
     }
     Ok(())
+}
+
+fn build_impact_out(
+    snapshot: &simplineage_core::Snapshot,
+    report: &simplineage_analysis::ImpactReport,
+    direction: ImpactDirection,
+    level: &LevelFlags,
+) -> ImpactOut {
+    let map_nodes = |ids: &[ObjectId]| -> Vec<ImpactNodeOut> {
+        ids.iter()
+            .map(|id| ImpactNodeOut {
+                id: id.to_string(),
+                fqn: context::object_display(snapshot, id),
+                kind: context::object_kind_label(snapshot, id).to_string(),
+            })
+            .collect()
+    };
+    let upstream_nodes = map_nodes(&report.upstream);
+    let downstream_nodes = map_nodes(&report.downstream);
+
+    ImpactOut {
+        subject: report.subject.to_string(),
+        subject_fqn: context::object_display(snapshot, &report.subject),
+        subject_kind: context::object_kind_label(snapshot, &report.subject).to_string(),
+        direction: direction_str(direction).into(),
+        level: level.label.to_string(),
+        total_affected: report.total_affected,
+        upstream: upstream_nodes.iter().map(|n| n.id.clone()).collect(),
+        downstream: downstream_nodes.iter().map(|n| n.id.clone()).collect(),
+        upstream_nodes,
+        downstream_nodes,
+    }
+}
+
+struct LevelFlags {
+    relations_only: bool,
+    columns_only: bool,
+    label: &'static str,
+}
+
+/// Resolve `--level` / `--relations-only` into engine flags.
+///
+/// Default `all` preserves historical behavior (no filtering).
+fn resolve_level(level: &str, relations_only_flag: bool) -> anyhow::Result<LevelFlags> {
+    let l = level.trim().to_ascii_lowercase();
+
+    // Explicit column level always wins over --relations-only.
+    if matches!(l.as_str(), "column" | "columns") {
+        return Ok(LevelFlags {
+            relations_only: false,
+            columns_only: true,
+            label: "column",
+        });
+    }
+
+    if relations_only_flag || matches!(l.as_str(), "relation" | "relations" | "table" | "tables") {
+        return Ok(LevelFlags {
+            relations_only: true,
+            columns_only: false,
+            label: "relation",
+        });
+    }
+
+    match l.as_str() {
+        "" | "all" | "auto" | "both" => Ok(LevelFlags {
+            relations_only: false,
+            columns_only: false,
+            label: "all",
+        }),
+        other => anyhow::bail!("unknown level '{other}' (all|relation|column)"),
+    }
 }
 
 fn parse_direction(s: &str) -> anyhow::Result<ImpactDirection> {

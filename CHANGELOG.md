@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Column-level lineage UX (CLI + HTML):** `upstream` / `downstream` / `impact` accept `schema.table.column`, `--column`, and `--level all|relation|column` (`ImpactOptions::columns_only`); text output shows `[kind] fqn`; JSON keeps id arrays and adds `subject_fqn` / `upstream_nodes` / `downstream_nodes`. HTML report embeds `parent_id` / data types, table **Columns** panel, smaller column nodes, dashed column edges, and focus-reveals columns under *Relations only*
 - Docker usage guide ([docs/docker.md](docs/docker.md)): runtime CLI image, volume mounts for samples/HTML export, and dev profile
 - `Snapshot::kind_index` / `contains_object`; `build_export_graph` for lightweight Mermaid/text exports; `importers::tabular` shared field aliases
 - Phase 7 offline interactive HTML lineage report: pan/zoom, search, filters, metadata panel, client-side impact analysis, dark mode, SVG + Mermaid export (no server); `export -f mermaid`

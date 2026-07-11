@@ -311,28 +311,42 @@ pub fn write_html_report(snapshot: &Snapshot, path: &Path) -> Result<()> {
 }
 
 fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: &[ReportEdge]) {
-    // Adjacency for longest-path layering (sources = layer 0).
+    // Only nodes that participate in lineage edges drive the main layered layout.
+    // Catalog/schema/column-only objects used to pack into layer 0 and push real
+    // sources thousands of pixels down, producing huge vertical edges.
+    let mut connected: BTreeSet<String> = BTreeSet::new();
+    for e in edges {
+        connected.insert(e.from.clone());
+        connected.insert(e.to.clone());
+    }
+
     let mut outs: HashMap<String, Vec<String>> = HashMap::new();
+    let mut ins: HashMap<String, Vec<String>> = HashMap::new();
     let mut indeg: HashMap<String, usize> = HashMap::new();
-    for id in nodes.keys() {
+    for id in &connected {
         indeg.entry(id.clone()).or_insert(0);
         outs.entry(id.clone()).or_default();
+        ins.entry(id.clone()).or_default();
     }
     for e in edges {
+        if !connected.contains(&e.from) || !connected.contains(&e.to) {
+            continue;
+        }
         outs.entry(e.from.clone()).or_default().push(e.to.clone());
+        ins.entry(e.to.clone()).or_default().push(e.from.clone());
         *indeg.entry(e.to.clone()).or_insert(0) += 1;
         indeg.entry(e.from.clone()).or_insert(0);
     }
 
     let mut layer: HashMap<String, usize> = HashMap::new();
     let mut q: VecDeque<String> = VecDeque::new();
-    for (id, &d) in &indeg {
-        if d == 0 {
+    for id in &connected {
+        if *indeg.get(id).unwrap_or(&0) == 0 {
             q.push_back(id.clone());
             layer.insert(id.clone(), 0);
         }
     }
-    // Kahn-like with longest path
+    // Kahn-like with longest path (sources = layer 0).
     let mut remaining = indeg.clone();
     let mut seen = BTreeSet::new();
     while let Some(u) = q.pop_front() {
@@ -354,12 +368,11 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
             }
         }
     }
-    // Unvisited (cycles / leftovers)
-    for id in nodes.keys() {
+    for id in &connected {
         layer.entry(id.clone()).or_insert(0);
     }
 
-    // Bucket by layer for y packing
+    // Bucket connected nodes by layer.
     let mut by_layer: BTreeMap<usize, Vec<String>> = BTreeMap::new();
     for (id, l) in &layer {
         by_layer.entry(*l).or_default().push(id.clone());
@@ -368,19 +381,137 @@ fn assign_layers_and_positions(nodes: &mut BTreeMap<String, ReportNode>, edges: 
         ids.sort();
     }
 
-    const X_GAP: f64 = 220.0;
-    const Y_GAP: f64 = 72.0;
+    // Barycenter ordering: keep nodes near their neighbors to shorten edges.
+    const ORDER_PASSES: usize = 6;
+    for _ in 0..ORDER_PASSES {
+        let layers: Vec<usize> = by_layer.keys().copied().collect();
+        // Sweep left → right using upstream barycenters.
+        for l in layers.iter().copied().skip(1) {
+            let prev = match by_layer.get(&(l.saturating_sub(1))) {
+                Some(p) if !p.is_empty() => p.clone(),
+                _ => continue,
+            };
+            let index: HashMap<String, usize> = prev
+                .iter()
+                .enumerate()
+                .map(|(i, id)| (id.clone(), i))
+                .collect();
+            if let Some(ids) = by_layer.get_mut(&l) {
+                ids.sort_by(|a, b| {
+                    let ba = barycenter(a, &ins, &index);
+                    let bb = barycenter(b, &ins, &index);
+                    ba.partial_cmp(&bb)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.cmp(b))
+                });
+            }
+        }
+        // Sweep right → left using downstream barycenters.
+        for l in layers.into_iter().rev().skip(1) {
+            let next = match by_layer.get(&(l + 1)) {
+                Some(n) if !n.is_empty() => n.clone(),
+                _ => continue,
+            };
+            let index: HashMap<String, usize> = next
+                .iter()
+                .enumerate()
+                .map(|(i, id)| (id.clone(), i))
+                .collect();
+            if let Some(ids) = by_layer.get_mut(&l) {
+                ids.sort_by(|a, b| {
+                    let ba = barycenter(a, &outs, &index);
+                    let bb = barycenter(b, &outs, &index);
+                    ba.partial_cmp(&bb)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.cmp(b))
+                });
+            }
+        }
+    }
+
+    // Compact horizontal/vertical gaps for readable edges (node width ≈ 160).
+    const X_GAP: f64 = 200.0;
+    const Y_GAP: f64 = 64.0;
     const X0: f64 = 40.0;
     const Y0: f64 = 40.0;
+    const NODE_H: f64 = 44.0;
 
+    let mut max_y = Y0;
     for (l, ids) in &by_layer {
         for (i, id) in ids.iter().enumerate() {
             if let Some(n) = nodes.get_mut(id) {
                 n.layer = *l;
                 n.x = X0 + (*l as f64) * X_GAP;
                 n.y = Y0 + (i as f64) * Y_GAP;
+                max_y = max_y.max(n.y + NODE_H);
             }
         }
+    }
+
+    // Isolated catalog objects (columns, schemas, …) sit below the lineage
+    // graph in a dense grid so they never stretch primary edges.
+    let mut isolated: Vec<String> = nodes
+        .keys()
+        .filter(|id| !connected.contains(*id))
+        .cloned()
+        .collect();
+    isolated.sort();
+
+    const ISO_COLS: usize = 4;
+    const ISO_X_GAP: f64 = 180.0;
+    const ISO_Y_GAP: f64 = 56.0;
+    let iso_y0 = max_y + 80.0;
+    // Place isolated block to the right of the main graph when there are layers.
+    let max_layer = by_layer.keys().next_back().copied().unwrap_or(0);
+    let iso_x0 = X0 + (max_layer as f64 + 1.5) * X_GAP;
+
+    for (i, id) in isolated.iter().enumerate() {
+        if let Some(n) = nodes.get_mut(id) {
+            let col = i % ISO_COLS;
+            let row = i / ISO_COLS;
+            n.layer = 0;
+            n.x = iso_x0 + (col as f64) * ISO_X_GAP;
+            n.y = iso_y0 + (row as f64) * ISO_Y_GAP;
+        }
+    }
+
+    // Graphs with no edges: compact grid of all nodes.
+    if connected.is_empty() && !nodes.is_empty() {
+        let mut all: Vec<String> = nodes.keys().cloned().collect();
+        all.sort();
+        for (i, id) in all.iter().enumerate() {
+            if let Some(n) = nodes.get_mut(id) {
+                let col = i % 6;
+                let row = i / 6;
+                n.layer = 0;
+                n.x = X0 + (col as f64) * X_GAP;
+                n.y = Y0 + (row as f64) * Y_GAP;
+            }
+        }
+    }
+}
+
+fn barycenter(
+    id: &str,
+    neighbors: &HashMap<String, Vec<String>>,
+    index: &HashMap<String, usize>,
+) -> f64 {
+    let Some(ns) = neighbors.get(id) else {
+        return f64::MAX / 4.0;
+    };
+    let mut sum = 0.0;
+    let mut count = 0.0;
+    for n in ns {
+        if let Some(&i) = index.get(n) {
+            sum += i as f64;
+            count += 1.0;
+        }
+    }
+    if count == 0.0 {
+        // Keep stable relative order when no neighbor in the adjacent layer.
+        f64::MAX / 4.0
+    } else {
+        sum / count
     }
 }
 
@@ -455,6 +586,43 @@ mod tests {
         let stg = data.nodes.iter().find(|n| n.id == "view:stg").unwrap();
         assert!(stg.layer >= orders.layer);
         assert!(stg.x >= orders.x);
+    }
+
+    #[test]
+    fn connected_nodes_not_pushed_by_isolated_catalog() {
+        use simplineage_core::model::objects::Column;
+        use simplineage_core::model::types::DataType;
+
+        let mut s = sample();
+        // Many isolated columns used to pack into layer 0 and push sources down.
+        for i in 0..40 {
+            let fqn = format!("raw.orders.c{i}");
+            s.columns.push(Column {
+                meta: ObjectMeta::new(
+                    ObjectId::from_trusted(format!("column:c{i}")),
+                    FullyQualifiedName::parse_dotted(&fqn).unwrap(),
+                ),
+                parent_id: ObjectId::from_trusted("table:orders"),
+                ordinal: Some(i as u32),
+                data_type: DataType::String {
+                    max_length: None,
+                    is_char_length: None,
+                },
+                nullable: true,
+                is_primary_key: None,
+                raw_type: None,
+            });
+        }
+        let data = build_report_data(&s);
+        let orders = data.nodes.iter().find(|n| n.id == "table:orders").unwrap();
+        let stg = data.nodes.iter().find(|n| n.id == "view:stg").unwrap();
+        // Source and next layer should sit on a compact vertical band.
+        assert!(orders.y < 200.0, "orders.y={}", orders.y);
+        assert!(stg.y < 200.0, "stg.y={}", stg.y);
+        assert!((orders.y - stg.y).abs() < 120.0);
+        // Isolated columns sit below / aside, not between source layers.
+        let col = data.nodes.iter().find(|n| n.id == "column:c0").unwrap();
+        assert!(col.y > orders.y || col.x > stg.x);
     }
 
     #[test]

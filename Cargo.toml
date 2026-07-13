@@ -54,7 +54,7 @@ indexmap = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 csv = "1"
 calamine = "0.36"
-parquet = { version = "54", default-features = false, features = ["arrow", "snap", "zstd"] }
+parquet = { version = "59", default-features = false, features = ["arrow", "snap", "zstd"] }
 arrow-array = "54"
 arrow-schema = "54"
 arrow-cast = "54"
